@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import curses
 import getpass
 import ipaddress
 import plistlib
@@ -62,18 +63,45 @@ def ask(prompt: str, default: str | None = None) -> str:
         print("  (required, try again)")
 
 
-def ask_choice(prompt: str, options: list[str]) -> int:
-    """Show a numbered menu, return the chosen 0-based index."""
-    print(prompt)
-    for i, opt in enumerate(options, start=1):
-        print(f"  {i}. {opt}")
+def _draw_menu(stdscr, title: str, hint: str, rows: list[str], cursor: int) -> None:
+    stdscr.erase()
+    h, w = stdscr.getmaxyx()
+    stdscr.addstr(0, 0, title[: max(w - 1, 0)])
+    stdscr.addstr(1, 0, hint[: max(w - 1, 0)])
+    for i, label in enumerate(rows):
+        y = i + 3
+        if y >= h - 1:
+            break
+        attr = curses.A_REVERSE if i == cursor else curses.A_NORMAL
+        try:
+            stdscr.addstr(y, 2, label[: max(w - 3, 0)], attr)
+        except curses.error:
+            pass
+    stdscr.refresh()
+
+
+def _menu_loop(stdscr, title: str, options: list[str]) -> int | None:
+    curses.curs_set(0)
+    cursor = 0
     while True:
-        raw = input("> ").strip()
-        if raw.lower() in ("q", "quit"):
-            raise Abort()
-        if raw.isdigit() and 1 <= int(raw) <= len(options):
-            return int(raw) - 1
-        print(f"  enter a number 1-{len(options)} (or q to quit)")
+        _draw_menu(stdscr, title, "up/down or j/k move, enter select, q cancel", options, cursor)
+        ch = stdscr.getch()
+        if ch in (ord("q"), 27):
+            return None
+        elif ch in (curses.KEY_UP, ord("k")):
+            cursor = max(0, cursor - 1)
+        elif ch in (curses.KEY_DOWN, ord("j")):
+            cursor = min(len(options) - 1, cursor + 1)
+        elif ch in (10, 13, curses.KEY_ENTER):
+            return cursor
+
+
+def ask_choice(prompt: str, options: list[str]) -> int:
+    """Arrow-key menu (curses), returns the chosen 0-based index."""
+    result = curses.wrapper(_menu_loop, prompt, options)
+    if result is None:
+        raise Abort()
+    return result
 
 
 def confirm(prompt: str) -> bool:
@@ -82,31 +110,64 @@ def confirm(prompt: str) -> bool:
 
 
 # --------------------------------------------------------------------------
-# Image picker (~/Downloads first)
+# Image picker: arrow-key filesystem browser, starts in ~/Downloads
 # --------------------------------------------------------------------------
 
-def pick_image() -> Path:
-    search_dir = Path.home() / "Downloads"
+IMAGE_EXTS = (".img", ".img.xz")
+
+
+def _browse_loop(stdscr, start: Path):
+    curses.curs_set(0)
+    current = start
+    cursor = 0
     while True:
-        candidates = sorted(
-            p for p in search_dir.glob("*")
-            if p.is_file() and (p.name.endswith(".img") or p.name.endswith(".img.xz"))
-        )
-        options = [f"{p.name}  ({p.stat().st_size / (1024**3):.2f} GB)" for p in candidates]
-        options.append("Enter a different folder to search")
-        options.append("Type a full path directly")
-        print(f"\nLooking for CompanionPi images in: {search_dir}")
-        idx = ask_choice("Pick an image:", options)
-        if idx < len(candidates):
-            return candidates[idx]
-        if idx == len(candidates):
-            search_dir = Path(ask("Folder to search")).expanduser()
-            continue
-        raw = ask("Full path to the .img or .img.xz file")
-        path = Path(raw).expanduser()
-        if path.is_file():
-            return path
-        print(f"  no such file: {path}")
+        try:
+            entries = sorted(current.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+        except (PermissionError, FileNotFoundError):
+            entries = []
+        rows: list[tuple[str, str, Path | None]] = []
+        if current != current.parent:
+            rows.append(("up", "..", current.parent))
+        for p in entries:
+            if p.is_dir():
+                rows.append(("dir", p.name + "/", p))
+            elif p.name.endswith(IMAGE_EXTS):
+                size_gb = p.stat().st_size / (1024 ** 3)
+                rows.append(("file", f"{p.name}  ({size_gb:.2f} GB)", p))
+        if not rows:
+            rows.append(("none", "(nothing to show here)", None))
+        cursor = min(cursor, len(rows) - 1)
+
+        title = f"Pick a CompanionPi image  -  {current}"
+        hint = "up/down or j/k move, enter open/select, backspace up a dir, q cancel"
+        _draw_menu(stdscr, title, hint, [r[1] for r in rows], cursor)
+        ch = stdscr.getch()
+        if ch in (ord("q"), 27):
+            return None
+        elif ch in (curses.KEY_UP, ord("k")):
+            cursor = max(0, cursor - 1)
+        elif ch in (curses.KEY_DOWN, ord("j")):
+            cursor = min(len(rows) - 1, cursor + 1)
+        elif ch in (curses.KEY_BACKSPACE, 127, 8):
+            current = current.parent
+            cursor = 0
+        elif ch in (10, 13, curses.KEY_ENTER):
+            kind, _, path = rows[cursor]
+            if kind == "file":
+                return path
+            elif kind in ("dir", "up"):
+                current = path
+                cursor = 0
+
+
+def pick_image() -> Path:
+    start = Path.home() / "Downloads"
+    if not start.is_dir():
+        start = Path.home()
+    result = curses.wrapper(_browse_loop, start)
+    if result is None:
+        raise Abort()
+    return result
 
 
 # --------------------------------------------------------------------------
@@ -167,7 +228,8 @@ def flash_image(image_path: Path, disk_id: str) -> None:
     device = f"/dev/{disk_id}"
     if Path(RPI_IMAGER).exists():
         print(f"\nFlashing with rpi-imager CLI to {device} ...")
-        subprocess.run([RPI_IMAGER, "--cli", str(image_path), device], check=True)
+        print("(this writes raw to disk and needs admin rights; you may be asked for your password)")
+        subprocess.run(["sudo", RPI_IMAGER, "--cli", str(image_path), device], check=True)
         return
     print(f"\nrpi-imager not found at {RPI_IMAGER}; falling back to dd.")
     subprocess.run(["diskutil", "unmountDisk", device], check=True)
