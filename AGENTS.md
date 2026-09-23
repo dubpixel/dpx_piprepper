@@ -4,112 +4,150 @@ This document provides operational directives for AI coding assistants (GitHub C
 
 ---
 
-## PROJECT: [Project Name]
+## PROJECT: cardbless (dpx_piPrepper)
 
-**Instructions for customizing this section:**
-Replace the placeholders below with your project's specific information. Remove subsections that don't apply. This template is intentionally verbose — prune what you don't need.
-
-**Status:** [e.g., v0.1.0 complete (2026-06-05) ✅]  
-**Branch:** [e.g., `feature/core-app-implementation`]  
-**Version File:** [e.g., `VERSION` (currently 0.1.0)]
+**Status:** Spec complete (2026-09-22), implementation not started
+**Branch:** `docs/project-setup` (current); implementation lands on `feature/cardbless-v1-core`
+**Version File:** `VERSION` (not yet created; created at `0.1.0` when implementation starts)
 
 ### Architecture (2-minute summary)
 
-[One-paragraph overview: what this project does, core tech, how it works]
-
-**Example:** "Browser-based monitoring tool for Phabrix QX waveform monitors. Pure vanilla JS (no frameworks, no build step, no CDN). Connects to QX REST API on port 8080, polls status/logs every 2-5s, stores settings in localStorage. Works offline in airgapped broadcast facilities."
+A macOS command-line utility that prepares Raspberry Pi SD cards running the
+CompanionPi image (Bitfocus Companion v5.x) so each unit boots with a known admin
+user, SSH enabled, a static per-unit IPv4 address, and a unique hostname. Two jobs:
+**bless** (card already flashed; write per-unit cloud-init files to its boot
+partition) and **flash + bless** (write the CompanionPi image to the card first,
+then bless it). Supports batch runs across a stack of cards for a show: prompt to
+insert the next card, detect it, do the job, eject, repeat. Python 3, stdlib-first,
+no build step; shells out to `diskutil`, `openssl`, `dd`, `xz`, and `rpi-imager`.
 
 | Component | Tech/Location | Purpose | Notes |
 |-----------|---------------|---------|-------|
-| [Component 1] | [Tech] / `path/` | [What it does] | [Key details] |
-| [Component 2] | [Tech] / `path/` | [What it does] | [Key details] |
-| [Component 3] | [Tech] / `path/` | [What it does] | [Key details] |
-| [Reference docs] | [Format] / `path/` | [What it is] | **Source of truth for [topic]** |
+| cardbless script | Python 3 / `src/cardbless-v1.py` (not yet written) | CLI entry point: bless, flash, batch, hash-password | Single file, stdlib + PyYAML |
+| Show config | YAML / `config.yaml` (per-show, user-supplied) | Units list (hostname/IP), shared network/user settings | Never commit real show configs with password hashes |
+| cloud-init templates | YAML / rendered into `user-data`, `network-config` | First-boot config written to the card's boot partition | Rendered per unit, not stored as static files |
+| Full spec | Markdown / `doc/CLAUDE.md` | Detailed requirements, known-good file examples, gotchas | **Source of truth for the cardbless spec** |
 
 ### Agent Rules (for this repo)
 
 **Before ANY code change:**
-1. Work from `[main/master]` branch; create feature branch: `feature/brief-description`
+1. Work from `main` branch; create feature branch: `feature/brief-description`
 2. Bump VERSION file per semantic versioning (AGENTS.md §1)
 3. Create git commit for version bump, tag it: `git tag vX.Y.Z`
 
 **While coding:**
-- [Project-specific rule or constraint]
-- [Technology requirement or restriction]
-- [Testing/validation requirement]
+- macOS (Apple Silicon) is the primary platform; Linux support is nice-to-have, not required for v1
+- stdlib-first Python; PyYAML is the one acceptable extra dependency
+- Shell out to `diskutil`, `openssl`, `dd`, `xz`, `rpi-imager`; never use Python's
+  `crypt` module (removed in 3.13) for password hashing
+- Never guess at image, rpi-imager, or macOS disk behavior; verify against a real
+  card or say so explicitly
+- No em dashes in output text or docs; use semicolons, colons, or commas
 - Keep changes small, test before committing
 - File header per AGENTS.md §3
 
 **When done:**
 - Update CHANGELOG.md with feature list
 - Create PR per AGENTS.md §1 template
-- [Any project-specific verification steps]
+- For anything touching disk detection or writing to a boot partition, verify
+  against an actual mounted card before calling it done
 
 ### Critical Constraints
 
 **MUST HAVE:**
-- ✅ [Required capability or dependency]
-- ✅ [Required technology or approach]
-- ✅ [Required compatibility or standard]
+- ✅ Boot-partition writes only happen after confirming the volume looks like a
+  real Pi boot partition (`cmdline.txt`, `config.txt`, `meta-data` present)
+- ✅ Every rendered `user-data`/`network-config` is validated with PyYAML and then
+  read back and diffed against what was intended before considering the write done
+- ✅ Disk safety checks (external, physical, under max size, typed confirmation)
+  before any flash operation
 
 **DO NOT:**
-- ❌ [Forbidden action or technology]
-- ❌ [Assumption that must be avoided]
-- ❌ [Hard-coded value or static configuration]
-- ❌ [Change that requires explicit verification]
+- ❌ Never rely on rpi-imager's `--cloudinit-userdata` / `--cloudinit-networkconfig`
+  flags; there is a known macOS bug (rpi-imager issue #1385) where those files
+  never get copied. Bless ourselves afterward regardless.
+- ❌ Never `open` or otherwise let anything double-click files on the boot
+  partition (FAT has no permission bits; macOS/Finder will try to execute them)
+- ❌ Never use username `companion` for the admin user; that is Companion's own
+  service account
+- ❌ Never add a `ip=` kernel parameter to `cmdline.txt`; cloud-init's
+  `network-config` is the correct mechanism on this OS, not kernel networking
 
 ### Key Decisions
 
-- **[Decision Title]:** [Explanation - why this approach was chosen over alternatives]
-- **[Decision Title]:** [Rationale for architecture/design choice]
-- **[Decision Title]:** [Context for future agents]
-
-**Examples:**
-- **Dual README templates:** Hardware needs schematics/BOMs, software needs API docs - fundamentally different documentation needs
-- **No WebSocket:** QX REST API is HTTP-only. Polling is the only option.
-- **Bootstrap on connect:** Device specs vary by boot mode - auto-detect on initial connection
+- **Flash backend: rpi-imager CLI + `dd` fallback, no balena Etcher/balena-cli:**
+  rpi-imager is officially maintained by the Raspberry Pi Foundation and scriptable
+  via `--cli`. balena Etcher's own CLI has been unmaintained since ~2021 and its
+  GUI can't be scripted for batch use; balena-cli's `local flash` targets
+  balenaOS/balenaCloud devices, not generic Raspberry Pi OS images like CompanionPi.
+- **Subnet is per-show, not fixed:** the `/15`-style example in `doc/CLAUDE.md` is
+  a real config from one show network, not a placeholder. `config.yaml` keeps
+  subnet/gateway/DNS parameterized per show rather than hardcoded.
+- **DNS defaults to the gateway address:** these are local/offline show networks;
+  no separate upstream resolver is assumed.
+- **Sudo stays passwordless (`NOPASSWD:ALL`):** matches the known-good `user-data`
+  example; onsite techs swapping cards under time pressure shouldn't be blocked on
+  a sudo password prompt.
+- **Image source defaults to local, with a remote picker:** the tool defaults to a
+  local `.img.xz` path in config, but also supports listing available CompanionPi
+  builds from Bitfocus's stable release tree and defaulting the selection to the
+  latest stable build when the user wants to fetch instead of pointing at a file.
 
 ### Gotchas & Landmines
 
-1. **[Issue Title]:** [Description]. [Workaround or solution]. [Where to look for more info]
-2. **[Issue Title]:** [Description]. [Workaround or solution].
-3. **[Issue Title]:** [Description]. [Always check/verify X before doing Y].
-
-**Examples:**
-- **CORS issue:** API calls from `file://` origin fail. Use launch script or Python server, not direct open.
-- **Boot modes matter:** Device can boot in different modes. Different endpoints available per mode. Always auto-detect on connect.
-- **Manual is authority:** If specs seem odd, check `/docs/manual.pdf` Ch.X. Don't guess.
+1. **FAT executable-bit trap:** Never double-click files on the boot partition in
+   Finder. FAT has no permission bits, so macOS treats every file as executable;
+   Finder hands it to Terminal and runs it. A second attempt gets blocked by
+   Gatekeeper with a misleading "damaged" message. The tool must never `open` these
+   files.
+2. **`$6$` hash quoting:** Writing a `$6$...` password hash through a shell
+   expands it unless single-quoted or written via a quoted heredoc (`<< 'EOF'`).
+   Write the hash from Python directly; don't shell out for this step.
+3. **Kernel `ip=` is a dead end:** was tried first and is the wrong approach on
+   this OS; cloud-init's `network-config` (rendered to netplan, then
+   NetworkManager) is the correct mechanism. See `doc/CLAUDE.md` for the full
+   networking chain.
+4. **YAML paste errors are real:** an earlier manual attempt pasted heredoc
+   wrapper lines (`cat > ... << 'EOF'` / `EOF`) directly into `network-config`,
+   producing invalid YAML that booted with no network config. PyYAML validation
+   plus read-back verification catches this class of error; don't skip either step.
 
 ### Common Operations
 
-**[Operation 1 - e.g., Create new project]:** `./script.sh` (interactive prompts for X/Y/Z)
+**Bless an already-flashed card:** `cardbless bless --config show.yaml` (not yet
+implemented) — renders and writes `user-data`/`network-config` for the next unit
+in the config, validates, writes, verifies, ejects.
 
-**[Operation 2 - e.g., Modify behavior]:** Edit `path/to/file.ext` - all logic centralized
+**Flash + bless a card from scratch:** `cardbless flash --config show.yaml` (not
+yet implemented) — writes the CompanionPi image via rpi-imager (or `dd` fallback),
+then runs the bless step.
 
-**[Operation 3 - e.g., Add components]:** Add to `path/`, update `config.ext` if special handling needed
+**Prep a whole stack of cards for a show:** `cardbless batch --config show.yaml
+[--flash]` (not yet implemented) — iterates the units list, prompting to insert
+each card.
 
-**[Operation 4 - e.g., Template processing]:**
-- [Scenario A]: `input-A.ext` → `output.ext`
-- [Scenario B]: `input-B.ext` → `output.ext`  
-- [Always]: `.git` and `.env` excluded from copy
+**Generate a password hash for config.yaml:** `cardbless hash-password` (not yet
+implemented) — prompts twice with no echo, outputs a `$6$` hash via
+`openssl passwd -6` (falls back to Homebrew `openssl@3` if the system LibreSSL
+lacks `-6`).
 
 ### Reference
 
-See `/CONTEXT.md` for:
-- [Extended architecture details]
-- [Module/component specifications]
-- [Data schemas or API contracts]
-
-See `/.github/CONTEXT.md` for:
-- [API endpoint reference]
-- [Configuration specifications]
-- [Testing procedures]
+See `doc/CLAUDE.md` for:
+- Full spec, including verified facts about the CompanionPi image and boot process
+- Known-good `user-data`/`network-config`/`cmdline.txt` examples
+- The YAML config schema (shared settings + per-unit list)
+- Card detection/safety rules, flash mode details, bless mode step-by-step
+- Nice-to-have features deferred past v1 (post-boot verify, SSH key auth, Linux
+  support)
 
 ### Development Philosophy
 
-[Optional: High-level principles for this project type]
-
-**Example:** "This is broadcast infrastructure tooling - reliability and simplicity trump features. Prefer vanilla JavaScript over frameworks. Keep dependencies minimal and auditable. Test in airgapped environments. Design for 24/7 unattended operation."
+This is show/broadcast infrastructure tooling: reliability and being paranoid
+about not wiping the wrong disk matter more than features. Prefer stdlib Python
+over extra dependencies. Verify against a real card rather than assuming image or
+OS behavior. Design for onsite techs working quickly under time pressure, prepping
+a stack of cards back-to-back.
 
 ---
 ## 0. Mid-Session Issue Triage (MANDATORY)

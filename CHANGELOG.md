@@ -8,7 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- 
+- Project scaffolding and documentation established: `AGENTS.md` PROJECT section
+  and `README.md` filled in for cardbless (the CompanionPi SD card flasher +
+  blesser); see `doc/CLAUDE.md` for the full spec.
 
 ### Changed
 - 

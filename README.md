@@ -33,9 +33,9 @@
     <img src="images/logo.png" alt="Logo" height="120">
   </a>
 <h1 align="center">dpx_piprepper</h1>
-<h3 align="center"><i>a sassy project tag line here</i></h3>
+<h3 align="center"><i>cardbless: prep a stack of CompanionPi SD cards without touching a keyboard twice</i></h3>
   <p align="center">
-    roll out dem crusty bitches
+    flash it, bless it, eject it, next card
     <br />
      »  
      <a href="https://github.com/dubpixel/dpx_piprepper"><strong>Project Here!</strong></a>
@@ -65,7 +65,6 @@
       </ul>
     </li>
     <li><a href="#usage">Usage</a></li>    
-    <li><a href="#reflection">Reflection</a></li>
     <li><a href="#roadmap">Roadmap</a></li>
     <li><a href="#contributing">Contributing</a></li>
     <li><a href="#license">License</a></li>
@@ -76,7 +75,24 @@
 <!-- ABOUT THE PROJECT -->
 <details>
 <summary><h3>About The Project</h3></summary>
-a lengthy description about the project that should probably be many lines. this is where you can get deep about shit and be like oh man its the best hot dog in the universe because i use the koskusko mustart!
+
+**cardbless** is a macOS command-line tool that preps Raspberry Pi SD cards
+running the CompanionPi image (Bitfocus Companion v5.x) for a show. Out of the
+box, a fresh CompanionPi card has no admin user, no SSH, and no static IP; every
+card needs the same manual first-boot dance repeated by hand. This tool does that
+dance for you, and does it for a whole stack of cards in one sitting.
+
+Two jobs:
+
+- **bless**: card is already flashed; write per-unit cloud-init files
+  (`user-data`, `network-config`) to its boot partition so it comes up with a
+  known admin user, SSH enabled, a static per-unit IP, and a unique hostname.
+- **flash + bless**: write the CompanionPi image to the card first, then bless it.
+
+Both support a **batch mode**: work through a list of units for a show, prompt to
+insert the next card, detect it, do the job, eject, repeat.
+
+Full spec lives in [`doc/CLAUDE.md`](doc/CLAUDE.md).
 </br>
 
 *author(s): // www.dubpixel.tv  - i@dubpixel.tv | other authors* 
@@ -90,56 +106,63 @@ a lengthy description about the project that should probably be many lines. this
 
 ### Built With 
  
- * 
+ * Python 3 (stdlib-first) + PyYAML
+ * [Raspberry Pi Imager CLI](https://github.com/raspberrypi/rpi-imager) (primary flash backend)
+ * macOS `diskutil`, `dd`, `xz`, `openssl` (fallback flash backend + card prep)
 
-<!--
- * [![KiCad][KiCad.org]][KiCad-url]
- * [![Fusion360][Fusion-360]][Autodesk-url]
- * [![FastLed][FastLed.io]][FastLed-url]
- * [![Fusion360][Fusion-360]][Autodesk-url]
- * [![Next][Next.js]][Next-url]
- * [![React][React.js]][React-url]
- * [![Vue][Vue.js]][Vue-url]
- * [![Angular][Angular.io]][Angular-url]
- * [![Svelte][Svelte.dev]][Svelte-url]
- * [![Laravel][Laravel.com]][Laravel-url]
- * [![Bootstrap][Bootstrap.com]][Bootstrap-url]
- * [![JQuery][JQuery.com]][JQuery-url]
- 
--->
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 <!-- GETTING STARTED -->
 
 ## Getting Started
 
+> **Status:** spec complete, implementation not started yet. Commands below show
+> the planned CLI shape and are marked accordingly.
+
   ### Prerequisites
-  * 
+  * macOS (Apple Silicon primary; Linux is nice-to-have, not required)
+  * Python 3
+  * [Raspberry Pi Imager](https://www.raspberrypi.com/software/) installed, if using flash mode
+  * `openssl` with `-6` support for password hashing (macOS's system LibreSSL may
+    lack this; Homebrew `openssl@3` is the fallback)
+
   ### Installation
 
-  1. 
+  1. Clone this repo
+  2. Copy `config.yaml.example` to `config.yaml` and fill in your show's units,
+     network, and admin user *(not yet available — planned for v1)*
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- USAGE EXAMPLES -->
 ## Usage
 
-1. <!-- Use this space to show useful examples of how a project can be used. Additional screenshots, code examples and demos work well in this space. You may also link to more resources.
+*(planned CLI — not yet implemented)*
 
-_For more examples, please refer to the [Documentation](https://example.com)_-->
-<!-- REFLECTION -->
-## Reflection
+```sh
+# Generate a password hash to put in config.yaml
+cardbless hash-password
 
-* what did we learn? 
-  - _x_
-* what do we like/hate?
-  - _y_
-* what would/could we do differently?
-  - _z_
-  <!-- ROADMAP -->
+# Bless an already-flashed card with the next unit in the config
+cardbless bless --config show.yaml
+
+# Flash the CompanionPi image onto a card, then bless it
+cardbless flash --config show.yaml
+
+# Work through a whole stack of cards for a show
+cardbless batch --config show.yaml [--flash]
+```
+
+_For the full spec, see [`doc/CLAUDE.md`](doc/CLAUDE.md)._
+<!-- ROADMAP -->
 ## Roadmap
 
-- [ ] Feature 1
-    - [ ] Nested Feature
+- [ ] v1: bless mode (write cloud-init files to an already-flashed card)
+- [ ] v1: flash + bless mode (rpi-imager CLI primary, `dd` fallback)
+- [ ] v1: batch mode (prompt through a stack of cards for a show)
+- [ ] v1: remote image listing from Bitfocus's stable release tree, defaulting to latest
+- [ ] Nice-to-have: post-boot verify (ping unit, check Companion's web port)
+- [ ] Nice-to-have: SSH public key auth alongside/instead of password
+- [ ] Nice-to-have: Linux support (`lsblk` instead of `diskutil`)
 
 See the [open issues](https://github.com/dubpixel/dpx_piprepper/issues) for a full list of proposed features (and known issues).
 
