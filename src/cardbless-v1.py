@@ -530,7 +530,10 @@ def bless(bootfs: Path, username: str, password_hash: str, hostname: str, net: d
     write_validated(bootfs / "network-config", render_network_config(net["ip"], net["prefix"], net["gateway"]))
     strip_ip_kernel_param(bootfs)
     clean_legacy_files(bootfs)
-    subprocess.run(["dot_clean", str(bootfs)], check=False)
+    # dot_clean routinely fails on macOS's own hidden system folders on FAT
+    # volumes (.Spotlight-V100, .fseventsd, etc); that's expected, not a real
+    # error, so swallow its output instead of scaring the user with it.
+    subprocess.run(["dot_clean", str(bootfs)], check=False, capture_output=True)
 
 
 def eject(disk_or_path) -> None:
