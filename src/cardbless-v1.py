@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import curses
 import getpass
 import ipaddress
 import plistlib
@@ -63,94 +62,18 @@ def ask(prompt: str, default: str | None = None) -> str:
         print("  (required, try again)")
 
 
-def _visible_rows(h: int) -> int:
-    """How many list rows fit below the title/hint lines."""
-    return max(h - 4, 1)
-
-
-def _clamp_offset(cursor: int, offset: int, visible: int, total: int) -> int:
-    if cursor < offset:
-        offset = cursor
-    elif cursor >= offset + visible:
-        offset = cursor - visible + 1
-    return max(0, min(offset, max(0, total - visible)))
-
-
-def _draw_menu(stdscr, title: str, hint: str, rows: list[str], cursor: int, offset: int) -> None:
-    stdscr.erase()
-    h, w = stdscr.getmaxyx()
-    visible = _visible_rows(h)
-    more_above = offset > 0
-    more_below = offset + visible < len(rows)
-    scroll_note = ""
-    if more_above and more_below:
-        scroll_note = "  (more above/below - scroll with up/down)"
-    elif more_above:
-        scroll_note = "  (more above - scroll up)"
-    elif more_below:
-        scroll_note = "  (more below - scroll down)"
-    stdscr.addstr(0, 0, title[: max(w - 1, 0)])
-    stdscr.addstr(1, 0, (hint + scroll_note)[: max(w - 1, 0)])
-    to_draw = list(range(offset, min(offset + visible, len(rows))))
-    drawn = 0
-    for i in to_draw:
-        y = 3 + (i - offset)
-        attr = curses.A_REVERSE if i == cursor else curses.A_NORMAL
-        try:
-            stdscr.addstr(y, 2, rows[i][: max(w - 3, 0)], attr)
-            drawn += 1
-        except curses.error:
-            pass
-    stdscr.refresh()
-    if to_draw and drawn == 0:
-        # Every row failed to render (terminal/curses quirk) - don't fail silently,
-        # let the caller catch this and fall back to a plain list instead.
-        raise RuntimeError("curses could not draw any menu rows in this terminal")
-
-
-def _menu_loop(stdscr, title: str, options: list[str]) -> int | None:
-    curses.curs_set(0)
-    cursor = 0
-    offset = 0
-    while True:
-        h, _ = stdscr.getmaxyx()
-        offset = _clamp_offset(cursor, offset, _visible_rows(h), len(options))
-        _draw_menu(stdscr, title, "up/down or j/k move, enter select, q cancel", options, cursor, offset)
-        ch = stdscr.getch()
-        if ch in (ord("q"), 27):
-            return None
-        elif ch in (curses.KEY_UP, ord("k")):
-            cursor = max(0, cursor - 1)
-        elif ch in (curses.KEY_DOWN, ord("j")):
-            cursor = min(len(options) - 1, cursor + 1)
-        elif ch in (10, 13, curses.KEY_ENTER):
-            return cursor
-
-
-def _fallback_choice(prompt: str, options: list[str]) -> int | None:
-    """Plain numbered-list picker, used if curses can't run in this terminal."""
+def ask_choice(prompt: str, options: list[str]) -> int:
+    """Plain numbered-list picker. Type a number, or q to quit."""
     print(prompt)
     for i, opt in enumerate(options, start=1):
         print(f"  {i}. {opt}")
     while True:
         raw = input("> ").strip()
         if raw.lower() in ("q", "quit"):
-            return None
+            raise Abort()
         if raw.isdigit() and 1 <= int(raw) <= len(options):
             return int(raw) - 1
         print(f"  enter a number 1-{len(options)} (or q to quit)")
-
-
-def ask_choice(prompt: str, options: list[str]) -> int:
-    """Arrow-key menu (curses); falls back to a numbered list if curses fails."""
-    try:
-        result = curses.wrapper(_menu_loop, prompt, options)
-    except Exception as e:
-        print(f"(arrow-key menu unavailable in this terminal: {e}; using a plain list instead)")
-        result = _fallback_choice(prompt, options)
-    if result is None:
-        raise Abort()
-    return result
 
 
 def confirm(prompt: str) -> bool:
@@ -186,67 +109,22 @@ def _find_images_below(root: Path, max_depth: int = 6) -> list[Path]:
     return sorted(found, key=lambda p: str(p.relative_to(root)).lower())
 
 
-def _browse_loop(stdscr, start: Path):
-    curses.curs_set(0)
-    current = start
-    cursor = 0
-    offset = 0
-    while True:
-        try:
-            entries = sorted(current.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
-        except (PermissionError, FileNotFoundError):
-            entries = []
-        rows: list[tuple[str, str, Path | None]] = []
-        if current != current.parent:
-            rows.append(("up", "..", current.parent))
-        dirs = [p for p in entries if p.is_dir() and not p.name.startswith(".")]
-        for p in dirs:
-            rows.append(("dir", p.name + "/", p))
-        found = _find_images_below(current)
-        for p in found:
-            rel = p.relative_to(current)
-            size_gb = p.stat().st_size / (1024 ** 3)
-            rows.append(("file", f"{rel}  ({size_gb:.2f} GB)", p))
-        if not dirs and not found:
-            rows.append(("none", "(nothing to show here)", None))
-        cursor = min(cursor, len(rows) - 1)
-
-        title = f"Pick a CompanionPi image  -  {current}"
-        hint = "up/down or j/k move, enter open/select, backspace up a dir, q cancel"
-        h, _ = stdscr.getmaxyx()
-        offset = _clamp_offset(cursor, offset, _visible_rows(h), len(rows))
-        _draw_menu(stdscr, title, hint, [r[1] for r in rows], cursor, offset)
-        ch = stdscr.getch()
-        if ch in (ord("q"), 27):
-            return None
-        elif ch in (curses.KEY_UP, ord("k")):
-            cursor = max(0, cursor - 1)
-        elif ch in (curses.KEY_DOWN, ord("j")):
-            cursor = min(len(rows) - 1, cursor + 1)
-        elif ch in (curses.KEY_BACKSPACE, 127, 8):
-            current = current.parent
-            cursor = 0
-            offset = 0
-        elif ch in (10, 13, curses.KEY_ENTER):
-            kind, _, path = rows[cursor]
-            if kind == "file":
-                return path
-            elif kind in ("dir", "up"):
-                current = path
-                cursor = 0
-                offset = 0
-
-
-def _fallback_pick_image(start: Path) -> Path | None:
-    """Plain numbered list of every matching image found recursively under start."""
+def pick_image() -> Path:
+    """Plain numbered list of every matching image found recursively under
+    ~/Downloads. Type a number, or q to quit."""
+    start = Path.home() / "Downloads"
+    if not start.is_dir():
+        start = Path.home()
     found = _find_images_below(start)
     if not found:
         print(f"No .img/.img.xz files found under {start} (searched subfolders too).")
         raw = input("Type a full path to the image (or leave blank to cancel): ").strip()
         if not raw:
-            return None
+            raise Abort()
         path = Path(raw).expanduser()
-        return path if path.is_file() else None
+        if not path.is_file():
+            raise Abort()
+        return path
     print(f"CompanionPi images found under {start}:")
     for i, p in enumerate(found, start=1):
         size_gb = p.stat().st_size / (1024 ** 3)
@@ -255,7 +133,7 @@ def _fallback_pick_image(start: Path) -> Path | None:
     while True:
         raw = input("> ").strip()
         if raw.lower() in ("q", "quit"):
-            return None
+            raise Abort()
         if raw.isdigit():
             n = int(raw)
             if 1 <= n <= len(found):
@@ -268,21 +146,6 @@ def _fallback_pick_image(start: Path) -> Path | None:
                 print(f"  no such file: {path}")
                 continue
         print(f"  enter a number 1-{len(found) + 1} (or q to quit)")
-
-
-def pick_image() -> Path:
-    """Arrow-key file browser; falls back to a plain numbered list (still
-    recursive under ~/Downloads) if curses can't render in this terminal."""
-    start = Path.home() / "Downloads"
-    if not start.is_dir():
-        start = Path.home()
-    try:
-        result = curses.wrapper(_browse_loop, start)
-    except Exception:
-        result = _fallback_pick_image(start)
-    if result is None:
-        raise Abort()
-    return result
 
 
 # --------------------------------------------------------------------------
