@@ -271,14 +271,12 @@ def _fallback_pick_image(start: Path) -> Path | None:
 
 
 def pick_image() -> Path:
+    """Plain numbered list, recursive under ~/Downloads. No curses here -
+    the arrow-key file browser was unreliable across terminals; this isn't."""
     start = Path.home() / "Downloads"
     if not start.is_dir():
         start = Path.home()
-    try:
-        result = curses.wrapper(_browse_loop, start)
-    except Exception as e:
-        print(f"(arrow-key browser unavailable in this terminal: {e}; using a plain list instead)")
-        result = _fallback_pick_image(start)
+    result = _fallback_pick_image(start)
     if result is None:
         raise Abort()
     return result
