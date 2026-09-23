@@ -63,18 +63,39 @@ def ask(prompt: str, default: str | None = None) -> str:
         print("  (required, try again)")
 
 
-def _draw_menu(stdscr, title: str, hint: str, rows: list[str], cursor: int) -> None:
+def _visible_rows(h: int) -> int:
+    """How many list rows fit below the title/hint lines."""
+    return max(h - 4, 1)
+
+
+def _clamp_offset(cursor: int, offset: int, visible: int, total: int) -> int:
+    if cursor < offset:
+        offset = cursor
+    elif cursor >= offset + visible:
+        offset = cursor - visible + 1
+    return max(0, min(offset, max(0, total - visible)))
+
+
+def _draw_menu(stdscr, title: str, hint: str, rows: list[str], cursor: int, offset: int) -> None:
     stdscr.erase()
     h, w = stdscr.getmaxyx()
+    visible = _visible_rows(h)
+    more_above = offset > 0
+    more_below = offset + visible < len(rows)
+    scroll_note = ""
+    if more_above and more_below:
+        scroll_note = "  (more above/below - scroll with up/down)"
+    elif more_above:
+        scroll_note = "  (more above - scroll up)"
+    elif more_below:
+        scroll_note = "  (more below - scroll down)"
     stdscr.addstr(0, 0, title[: max(w - 1, 0)])
-    stdscr.addstr(1, 0, hint[: max(w - 1, 0)])
-    for i, label in enumerate(rows):
-        y = i + 3
-        if y >= h - 1:
-            break
+    stdscr.addstr(1, 0, (hint + scroll_note)[: max(w - 1, 0)])
+    for i in range(offset, min(offset + visible, len(rows))):
+        y = 3 + (i - offset)
         attr = curses.A_REVERSE if i == cursor else curses.A_NORMAL
         try:
-            stdscr.addstr(y, 2, label[: max(w - 3, 0)], attr)
+            stdscr.addstr(y, 2, rows[i][: max(w - 3, 0)], attr)
         except curses.error:
             pass
     stdscr.refresh()
@@ -83,8 +104,11 @@ def _draw_menu(stdscr, title: str, hint: str, rows: list[str], cursor: int) -> N
 def _menu_loop(stdscr, title: str, options: list[str]) -> int | None:
     curses.curs_set(0)
     cursor = 0
+    offset = 0
     while True:
-        _draw_menu(stdscr, title, "up/down or j/k move, enter select, q cancel", options, cursor)
+        h, _ = stdscr.getmaxyx()
+        offset = _clamp_offset(cursor, offset, _visible_rows(h), len(options))
+        _draw_menu(stdscr, title, "up/down or j/k move, enter select, q cancel", options, cursor, offset)
         ch = stdscr.getch()
         if ch in (ord("q"), 27):
             return None
@@ -141,6 +165,7 @@ def _browse_loop(stdscr, start: Path):
     curses.curs_set(0)
     current = start
     cursor = 0
+    offset = 0
     while True:
         try:
             entries = sorted(current.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
@@ -163,7 +188,9 @@ def _browse_loop(stdscr, start: Path):
 
         title = f"Pick a CompanionPi image  -  {current}"
         hint = "up/down or j/k move, enter open/select, backspace up a dir, q cancel"
-        _draw_menu(stdscr, title, hint, [r[1] for r in rows], cursor)
+        h, _ = stdscr.getmaxyx()
+        offset = _clamp_offset(cursor, offset, _visible_rows(h), len(rows))
+        _draw_menu(stdscr, title, hint, [r[1] for r in rows], cursor, offset)
         ch = stdscr.getch()
         if ch in (ord("q"), 27):
             return None
@@ -174,6 +201,7 @@ def _browse_loop(stdscr, start: Path):
         elif ch in (curses.KEY_BACKSPACE, 127, 8):
             current = current.parent
             cursor = 0
+            offset = 0
         elif ch in (10, 13, curses.KEY_ENTER):
             kind, _, path = rows[cursor]
             if kind == "file":
@@ -181,6 +209,7 @@ def _browse_loop(stdscr, start: Path):
             elif kind in ("dir", "up"):
                 current = path
                 cursor = 0
+                offset = 0
 
 
 def pick_image() -> Path:
