@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import getpass
 import ipaddress
+import os
 import plistlib
 import re
 import shutil
@@ -417,12 +418,57 @@ def log_result(hostname: str, ip: str, disk_id: str, ok: bool) -> None:
 # Main flow
 # --------------------------------------------------------------------------
 
+def cleanup_over_ssh() -> None:
+    """Post-boot step: SSH into an already-booted unit and remove the
+    cloud-init user-data/network-config files from its boot partition, so
+    the password hash doesn't sit around on a world-readable FAT partition.
+    This has to happen over the network after the card is booted in the Pi -
+    it can't be chained onto bless(), which runs before that."""
+    if not shutil.which("sshpass"):
+        print("This needs sshpass. Install it with: brew install sshpass")
+        raise Abort()
+    ip = ask("IP address of the booted unit")
+    username = ask("SSH username", default="dubpixel")
+    password = getpass.getpass("SSH password: ")
+
+    subprocess.run(["ssh-keygen", "-R", ip], capture_output=True, check=False)
+    env = {**os.environ, "SSHPASS": password}
+    check = subprocess.run(
+        ["sshpass", "-e", "ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5",
+         f"{username}@{ip}", "hostname"],
+        capture_output=True, text=True, env=env,
+    )
+    if check.returncode != 0:
+        print(f"  could not connect: {check.stderr.strip()}")
+        raise Abort()
+    hostname = check.stdout.strip()
+    print(f"  connected to {hostname} ({ip})")
+    if not confirm(f"Remove user-data/network-config from {hostname}'s boot partition?"):
+        raise Abort()
+    result = subprocess.run(
+        ["sshpass", "-e", "ssh", "-o", "ConnectTimeout=5", f"{username}@{ip}",
+         "sudo rm -f /boot/firmware/user-data /boot/firmware/network-config"],
+        capture_output=True, text=True, env=env,
+    )
+    if result.returncode == 0:
+        print(f"\nOK: cleaned up {hostname} ({ip}).")
+    else:
+        print(f"\nFAIL: {result.stderr.strip()}")
+
+
 def run_one_card() -> None:
     print("\n=== cardbless: prep a CompanionPi SD card ===")
     mode = ask_choice(
         "What do you need to do?",
-        ["Flash a new image, then bless it", "Bless a card that's already flashed"],
+        [
+            "Flash a new image, then bless it",
+            "Bless a card that's already flashed",
+            "Clean up cloud-init files on a booted unit (over SSH)",
+        ],
     )
+    if mode == 2:
+        cleanup_over_ssh()
+        return
 
     disk_id = None
     if mode == 0:
