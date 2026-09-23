@@ -116,6 +116,27 @@ def confirm(prompt: str) -> bool:
 IMAGE_EXTS = (".img", ".img.xz")
 
 
+def _find_images_below(root: Path, max_depth: int = 6) -> list[Path]:
+    """Recursively find image files at or below root, skipping hidden dirs."""
+    found = []
+    stack = [(root, 0)]
+    while stack:
+        d, depth = stack.pop()
+        try:
+            entries = list(d.iterdir())
+        except (PermissionError, FileNotFoundError):
+            continue
+        for p in entries:
+            if p.name.startswith("."):
+                continue
+            if p.is_dir():
+                if depth < max_depth:
+                    stack.append((p, depth + 1))
+            elif p.name.endswith(IMAGE_EXTS):
+                found.append(p)
+    return sorted(found, key=lambda p: str(p.relative_to(root)).lower())
+
+
 def _browse_loop(stdscr, start: Path):
     curses.curs_set(0)
     current = start
@@ -128,13 +149,15 @@ def _browse_loop(stdscr, start: Path):
         rows: list[tuple[str, str, Path | None]] = []
         if current != current.parent:
             rows.append(("up", "..", current.parent))
-        for p in entries:
-            if p.is_dir():
-                rows.append(("dir", p.name + "/", p))
-            elif p.name.endswith(IMAGE_EXTS):
-                size_gb = p.stat().st_size / (1024 ** 3)
-                rows.append(("file", f"{p.name}  ({size_gb:.2f} GB)", p))
-        if not rows:
+        dirs = [p for p in entries if p.is_dir() and not p.name.startswith(".")]
+        for p in dirs:
+            rows.append(("dir", p.name + "/", p))
+        found = _find_images_below(current)
+        for p in found:
+            rel = p.relative_to(current)
+            size_gb = p.stat().st_size / (1024 ** 3)
+            rows.append(("file", f"{rel}  ({size_gb:.2f} GB)", p))
+        if not dirs and not found:
             rows.append(("none", "(nothing to show here)", None))
         cursor = min(cursor, len(rows) - 1)
 
