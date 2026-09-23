@@ -39,3 +39,4 @@ fp-info-cache
 
 # kicad local profile
 *.kicad_prl
+cardbless.log
