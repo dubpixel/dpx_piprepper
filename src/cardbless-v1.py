@@ -91,14 +91,21 @@ def _draw_menu(stdscr, title: str, hint: str, rows: list[str], cursor: int, offs
         scroll_note = "  (more below - scroll down)"
     stdscr.addstr(0, 0, title[: max(w - 1, 0)])
     stdscr.addstr(1, 0, (hint + scroll_note)[: max(w - 1, 0)])
-    for i in range(offset, min(offset + visible, len(rows))):
+    to_draw = list(range(offset, min(offset + visible, len(rows))))
+    drawn = 0
+    for i in to_draw:
         y = 3 + (i - offset)
         attr = curses.A_REVERSE if i == cursor else curses.A_NORMAL
         try:
             stdscr.addstr(y, 2, rows[i][: max(w - 3, 0)], attr)
+            drawn += 1
         except curses.error:
             pass
     stdscr.refresh()
+    if to_draw and drawn == 0:
+        # Every row failed to render (terminal/curses quirk) - don't fail silently,
+        # let the caller catch this and fall back to a plain list instead.
+        raise RuntimeError("curses could not draw any menu rows in this terminal")
 
 
 def _menu_loop(stdscr, title: str, options: list[str]) -> int | None:
@@ -120,9 +127,27 @@ def _menu_loop(stdscr, title: str, options: list[str]) -> int | None:
             return cursor
 
 
+def _fallback_choice(prompt: str, options: list[str]) -> int | None:
+    """Plain numbered-list picker, used if curses can't run in this terminal."""
+    print(prompt)
+    for i, opt in enumerate(options, start=1):
+        print(f"  {i}. {opt}")
+    while True:
+        raw = input("> ").strip()
+        if raw.lower() in ("q", "quit"):
+            return None
+        if raw.isdigit() and 1 <= int(raw) <= len(options):
+            return int(raw) - 1
+        print(f"  enter a number 1-{len(options)} (or q to quit)")
+
+
 def ask_choice(prompt: str, options: list[str]) -> int:
-    """Arrow-key menu (curses), returns the chosen 0-based index."""
-    result = curses.wrapper(_menu_loop, prompt, options)
+    """Arrow-key menu (curses); falls back to a numbered list if curses fails."""
+    try:
+        result = curses.wrapper(_menu_loop, prompt, options)
+    except Exception as e:
+        print(f"(arrow-key menu unavailable in this terminal: {e}; using a plain list instead)")
+        result = _fallback_choice(prompt, options)
     if result is None:
         raise Abort()
     return result
@@ -212,11 +237,48 @@ def _browse_loop(stdscr, start: Path):
                 offset = 0
 
 
+def _fallback_pick_image(start: Path) -> Path | None:
+    """Plain numbered list of every matching image found recursively under start."""
+    found = _find_images_below(start)
+    if not found:
+        print(f"No .img/.img.xz files found under {start} (searched subfolders too).")
+        raw = input("Type a full path to the image (or leave blank to cancel): ").strip()
+        if not raw:
+            return None
+        path = Path(raw).expanduser()
+        return path if path.is_file() else None
+    print(f"CompanionPi images found under {start}:")
+    for i, p in enumerate(found, start=1):
+        size_gb = p.stat().st_size / (1024 ** 3)
+        print(f"  {i}. {p.relative_to(start)}  ({size_gb:.2f} GB)")
+    print(f"  {len(found) + 1}. Type a full path instead")
+    while True:
+        raw = input("> ").strip()
+        if raw.lower() in ("q", "quit"):
+            return None
+        if raw.isdigit():
+            n = int(raw)
+            if 1 <= n <= len(found):
+                return found[n - 1]
+            if n == len(found) + 1:
+                raw2 = input("Full path: ").strip()
+                path = Path(raw2).expanduser()
+                if path.is_file():
+                    return path
+                print(f"  no such file: {path}")
+                continue
+        print(f"  enter a number 1-{len(found) + 1} (or q to quit)")
+
+
 def pick_image() -> Path:
     start = Path.home() / "Downloads"
     if not start.is_dir():
         start = Path.home()
-    result = curses.wrapper(_browse_loop, start)
+    try:
+        result = curses.wrapper(_browse_loop, start)
+    except Exception as e:
+        print(f"(arrow-key browser unavailable in this terminal: {e}; using a plain list instead)")
+        result = _fallback_pick_image(start)
     if result is None:
         raise Abort()
     return result
