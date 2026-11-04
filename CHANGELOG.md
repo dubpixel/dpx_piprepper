@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-04
+
+### Added
+- Optional tagged VLAN (trunk mode) when blessing a card. The main network stays
+  untagged on `eth0`; an extra 802.1Q VLAN (default 218) is added as `eth0.<id>`,
+  either link-local (self-assigned 169.254.x.x, as Dante uses) or a static IP.
+  Overlapping subnets are refused. Declining the prompt leaves `network-config`
+  byte-identical to before.
+
 ## [Unreleased]
 
 ### Added

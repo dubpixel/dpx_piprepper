@@ -324,6 +324,52 @@ def ask_network(gateway_hint: str | None = None) -> dict:
         return {"ip": str(ip), "prefix": prefix, "gateway": str(gw)}
 
 
+def ask_vlan(net: dict) -> dict | None:
+    """Optionally add one tagged 802.1Q VLAN on eth0 (trunk mode).
+
+    The main network stays untagged on eth0 (works on an access port OR on a
+    trunk whose native VLAN is the main one). The extra VLAN is a tagged
+    subinterface eth0.<id>, so a trunk port can carry both. Returns None when
+    the user declines, else {"id": int, "ip": str|None, "prefix": int|None}
+    where ip is None for link-local (self-assigned 169.254.x.x, as Dante uses).
+    """
+    if not confirm("Also join a tagged VLAN on this port (trunk mode)?"):
+        return None
+    main_net = ipaddress.ip_network(f"{net['ip']}/{net['prefix']}", strict=False)
+    while True:
+        vid_raw = ask("VLAN ID (1-4094)", default="218")
+        if not (vid_raw.isdigit() and 1 <= int(vid_raw) <= 4094):
+            print("  VLAN ID must be a whole number from 1 to 4094")
+            continue
+        vid = int(vid_raw)
+        break
+    mode = ask_choice(
+        f"Addressing for VLAN {vid}:",
+        [
+            "Link-local (self-assigned 169.254.x.x, no config; what Dante uses)",
+            "Static IP",
+        ],
+    )
+    if mode == 0:
+        return {"id": vid, "ip": None, "prefix": None}
+    while True:
+        ip_raw = ask(f"Static IP on VLAN {vid}")
+        prefix_raw = ask("Network prefix length", default=str(net["prefix"]))
+        try:
+            prefix = int(prefix_raw)
+            vlan_net = ipaddress.ip_network(f"{ip_raw}/{prefix}", strict=False)
+            ip = ipaddress.ip_address(ip_raw)
+        except ValueError as e:
+            print(f"  invalid input: {e}")
+            continue
+        # Overlapping subnets on two interfaces cause duplicate connected
+        # routes and traffic leaving the wrong port, so refuse them outright.
+        if vlan_net.overlaps(main_net):
+            print(f"  {vlan_net} overlaps the main network {main_net}; pick a different subnet")
+            continue
+        return {"id": vid, "ip": str(ip), "prefix": prefix}
+
+
 # --------------------------------------------------------------------------
 # Rendering + writing
 # --------------------------------------------------------------------------
@@ -346,8 +392,8 @@ def render_user_data(username: str, password_hash: str, hostname: str) -> str:
     )
 
 
-def render_network_config(ip: str, prefix: int, gateway: str) -> str:
-    return (
+def render_network_config(ip: str, prefix: int, gateway: str, vlan: dict | None = None) -> str:
+    text = (
         "network:\n"
         "  version: 2\n"
         "  renderer: NetworkManager\n"
@@ -362,6 +408,22 @@ def render_network_config(ip: str, prefix: int, gateway: str) -> str:
         "      nameservers:\n"
         f"        addresses: [{gateway}]\n"
     )
+    if vlan:
+        # Tagged subinterface only for the extra VLAN; the main network stays
+        # untagged on eth0 (never create a tagged twin of it). No gateway or
+        # DNS here: the extra VLAN is an isolated segment.
+        text += (
+            "  vlans:\n"
+            f"    eth0.{vlan['id']}:\n"
+            f"      id: {vlan['id']}\n"
+            "      link: eth0\n"
+            "      dhcp4: false\n"
+        )
+        if vlan["ip"] is None:
+            text += "      link-local: [ipv4]\n"
+        else:
+            text += f"      addresses:\n        - {vlan['ip']}/{vlan['prefix']}\n"
+    return text
 
 
 def write_validated(path: Path, content: str) -> None:
@@ -394,7 +456,7 @@ def clean_legacy_files(bootfs: Path) -> None:
 
 def bless(bootfs: Path, username: str, password_hash: str, hostname: str, net: dict) -> None:
     write_validated(bootfs / "user-data", render_user_data(username, password_hash, hostname))
-    write_validated(bootfs / "network-config", render_network_config(net["ip"], net["prefix"], net["gateway"]))
+    write_validated(bootfs / "network-config", render_network_config(net["ip"], net["prefix"], net["gateway"], net.get("vlan")))
     strip_ip_kernel_param(bootfs)
     clean_legacy_files(bootfs)
     # dot_clean routinely fails on macOS's own hidden system folders on FAT
@@ -483,9 +545,14 @@ def run_one_card() -> None:
     password_hash = ask_password_hash()
     hostname = ask_hostname()
     net = ask_network()
+    net["vlan"] = ask_vlan(net)
 
     print(f"\nAbout to bless {bootfs}:")
     print(f"  user: {username}   hostname: {hostname}   ip: {net['ip']}/{net['prefix']}   gw: {net['gateway']}")
+    if net["vlan"]:
+        v = net["vlan"]
+        addr = "link-local (169.254.x.x)" if v["ip"] is None else f"{v['ip']}/{v['prefix']}"
+        print(f"  tagged VLAN {v['id']} on eth0.{v['id']}: {addr}")
     if not confirm("Proceed?"):
         raise Abort()
 
