@@ -91,7 +91,9 @@ numbered menus and prompts, then offers to prep another card. Three jobs:
   known admin user, SSH enabled, a static per-unit IP, and a unique hostname.
 - **flash + bless**: write the CompanionPi image to the card first, then bless it.
 - **clean up (over SSH)**: on a unit that has already booted, remove the leftover
-  cloud-init `user-data` and `network-config` from its boot partition.
+  cloud-init `user-data` and `network-config` from its boot partition, so the
+  password hash does not sit on the world-readable FAT partition. This runs after
+  the card has booted in the Pi, so it cannot be part of the bless step.
 
 **Trunk mode (optional):** when blessing, you can also join one tagged 802.1Q
 VLAN (default 218) alongside the untagged main network, either link-local
@@ -133,6 +135,7 @@ Full spec lives in [`doc/CLAUDE.md`](doc/CLAUDE.md).
     (falls back to `dd` + `xz` if it is not found)
   * `openssl` with `-6` support for password hashing (macOS's system LibreSSL may
     lack this; Homebrew `openssl@3` is the fallback)
+  * `sshpass` (`brew install sshpass`), only for the SSH cleanup mode
 
   ### Installation
 
