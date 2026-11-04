@@ -1,0 +1,53 @@
+<!--
+  dpx-midnight: a self-hosted dark GitHub Pages layout for dpx_readme_template.
+
+  Originally adapted from the "midnight" Jekyll theme (pages-themes/midnight,
+  https://github.com/pages-themes/midnight), designed by Matt Graham
+  (https://twitter.com/mattgraham). That theme is CC0-licensed (public domain)
+  so no attribution is legally required, but credit where it's due -- the
+  layout structure and dark color scheme started there. Forked locally so we
+  control the output directly instead of depending on a remote_theme, and so
+  there's no third-party attribution banner rendered on the page itself.
+-->
+<!doctype html>
+<html lang="{{ site.lang | default: "en-US" }}">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+
+{% seo %}
+    <link rel="stylesheet" href="{{ '/assets/css/style.css?v=' | append: site.github.build_revision | relative_url }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    {% include head-custom.html %}
+  </head>
+  <body>
+      <div id="header">
+        <nav>
+          <ul>
+            <li class="fork"><a href="{{ site.github.repository_url }}">View On GitHub</a></li>
+            {% if site.show_downloads %}
+              <li class="downloads"><a href="{{ site.github.zip_url }}">ZIP</a></li>
+              <li class="downloads"><a href="{{ site.github.tar_url }}">TAR</a></li>
+              <li class="title">DOWNLOADS</li>
+            {% endif %}
+          </ul>
+        </nav>
+      </div><!-- end header -->
+
+    <div class="wrapper">
+
+      <section>
+        <div id="title">
+          <h1>{{ site.title | default: site.github.repository_name }}</h1>
+          <p>{{ site.description | default: site.github.project_tagline }}</p>
+          <hr>
+          <span class="credits left">Project maintained by <a href="{{ site.github.owner_url }}">{{ site.github.owner_name }}</a></span>
+        </div>
+
+        {{ content }}
+
+      </section>
+
+    </div>
+  </body>
+</html>

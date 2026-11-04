@@ -1,9 +1,9 @@
-title: dpx_readme_template
-description: a readme template
-remote_theme: pages-themes/midnight@v0.2.0
-plugins:
-- jekyll-remote-theme # add this line to the plugins list if you already have one
-theme: jekyll-theme-minimal
+title: dpx_piprepper
+description: cardbless - prep a stack of CompanionPi SD cards
+# Theme is self-hosted locally (_layouts/, _sass/dpx-midnight.scss,
+# assets/css/style.scss) instead of via `remote_theme`/`theme` -- no gem
+# dependency, no third-party attribution banner rendered on the page. See
+# _sass/dpx-midnight.scss for the credit/license note on where it came from.
 markdown: kramdown
 kramdown:
   parse_block_html: true
