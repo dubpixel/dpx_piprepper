@@ -6,26 +6,30 @@ This document provides operational directives for AI coding assistants (GitHub C
 
 ## PROJECT: cardbless (dpx_piPrepper)
 
-**Status:** Spec complete (2026-09-22), implementation not started
-**Branch:** `docs/project-setup` (current); implementation lands on `feature/cardbless-v1-core`
-**Version File:** `VERSION` (not yet created; created at `0.1.0` when implementation starts)
+**Status:** v0.2.0, working (bless, flash + bless, post-boot SSH cleanup). The
+optional VLAN trunk prompt (v0.2.0) is rendered and YAML-validated but not yet
+boot-tested from a blessed card.
+**Branch:** `main` is the default; work lands on `feature/*` or `docs/*` branches
+**Version File:** `VERSION` (currently 0.2.0)
 
 ### Architecture (2-minute summary)
 
 A macOS command-line utility that prepares Raspberry Pi SD cards running the
 CompanionPi image (Bitfocus Companion v5.x) so each unit boots with a known admin
-user, SSH enabled, a static per-unit IPv4 address, and a unique hostname. Two jobs:
-**bless** (card already flashed; write per-unit cloud-init files to its boot
-partition) and **flash + bless** (write the CompanionPi image to the card first,
-then bless it). Supports batch runs across a stack of cards for a show: prompt to
-insert the next card, detect it, do the job, eject, repeat. Python 3, stdlib-first,
-no build step; shells out to `diskutil`, `openssl`, `dd`, `xz`, and `rpi-imager`.
+user, SSH enabled, a static per-unit IPv4 address, and a unique hostname. It is
+fully interactive (numbered menus, no flags, no config file) and loops with "prep
+another card?". Three jobs: **flash + bless** (write the CompanionPi image, then
+bless), **bless** (card already flashed; write per-unit cloud-init files to its boot
+partition), and **clean up** (over SSH, remove leftover cloud-init files from a
+booted unit). Blessing can optionally add one tagged 802.1Q VLAN (trunk mode).
+Python 3, stdlib-first, no build step; shells out to `diskutil`, `openssl`, `dd`,
+`xz`, and `rpi-imager`.
 
 | Component | Tech/Location | Purpose | Notes |
 |-----------|---------------|---------|-------|
-| cardbless script | Python 3 / `src/cardbless-v1.py` (not yet written) | CLI entry point: bless, flash, batch, hash-password | Single file, stdlib + PyYAML |
-| Show config | YAML / `config.yaml` (per-show, user-supplied) | Units list (hostname/IP), shared network/user settings | Never commit real show configs with password hashes |
-| cloud-init templates | YAML / rendered into `user-data`, `network-config` | First-boot config written to the card's boot partition | Rendered per unit, not stored as static files |
+| cardbless script | Python 3 / `src/cardbless-v1.py` | Interactive entry point: flash, bless, SSH cleanup | Single file, stdlib + PyYAML |
+| cloud-init rendering | Python / `render_user_data()`, `render_network_config()` | Builds `user-data` and `network-config` per unit | Rendered per unit, not stored as static files |
+| Run log | Text / `cardbless.log` | One line per blessed card (OK/FAIL, hostname, IP) | Gitignored; never commit |
 | Full spec | Markdown / `doc/CLAUDE.md` | Detailed requirements, known-good file examples, gotchas | **Source of truth for the cardbless spec** |
 
 ### Agent Rules (for this repo)
@@ -81,17 +85,25 @@ no build step; shells out to `diskutil`, `openssl`, `dd`, `xz`, and `rpi-imager`
   GUI can't be scripted for batch use; balena-cli's `local flash` targets
   balenaOS/balenaCloud devices, not generic Raspberry Pi OS images like CompanionPi.
 - **Subnet is per-show, not fixed:** the `/15`-style example in `doc/CLAUDE.md` is
-  a real config from one show network, not a placeholder. `config.yaml` keeps
-  subnet/gateway/DNS parameterized per show rather than hardcoded.
+  a real config from one show network, not a placeholder. The tool asks for IP,
+  prefix length and gateway per card rather than hardcoding any of them.
+- **VLAN trunk mode keeps the main network untagged:** the main network stays on
+  raw `eth0` (untagged) so a card works on an access port or on a trunk whose
+  native VLAN is the main one. The optional extra VLAN is a tagged `eth0.<id>`
+  netplan subinterface, link-local (self-assigned 169.254.x.x, what Dante uses) or
+  static, with no gateway or DNS. Never create a tagged twin of the main VLAN
+  (duplicate connected routes), and the tool rejects overlapping subnets. A single
+  IP cannot serve both tagged and untagged 196; the switch port must send the main
+  VLAN native.
 - **DNS defaults to the gateway address:** these are local/offline show networks;
   no separate upstream resolver is assumed.
 - **Sudo stays passwordless (`NOPASSWD:ALL`):** matches the known-good `user-data`
   example; onsite techs swapping cards under time pressure shouldn't be blocked on
   a sudo password prompt.
-- **Image source defaults to local, with a remote picker:** the tool defaults to a
-  local `.img.xz` path in config, but also supports listing available CompanionPi
-  builds from Bitfocus's stable release tree and defaulting the selection to the
-  latest stable build when the user wants to fetch instead of pointing at a file.
+- **Image source is local today:** the tool lists `.img` / `.img.xz` files found
+  recursively under `~/Downloads` (or takes a typed path). A remote picker that
+  lists CompanionPi builds from Bitfocus's stable release tree and defaults to the
+  latest stable build is planned, not implemented.
 
 ### Gotchas & Landmines
 
@@ -114,29 +126,31 @@ no build step; shells out to `diskutil`, `openssl`, `dd`, `xz`, and `rpi-imager`
 
 ### Common Operations
 
-**Bless an already-flashed card:** `cardbless bless --config show.yaml` (not yet
-implemented) — renders and writes `user-data`/`network-config` for the next unit
-in the config, validates, writes, verifies, ejects.
+**Run it:** `python3 src/cardbless-v1.py` (needs `pip3 install pyyaml`). No flags;
+the first menu picks the job.
 
-**Flash + bless a card from scratch:** `cardbless flash --config show.yaml` (not
-yet implemented) — writes the CompanionPi image via rpi-imager (or `dd` fallback),
-then runs the bless step.
+**Flash + bless:** pick the image (numbered list from `~/Downloads`), pick the disk
+(external, physical, size-capped, typed confirmation), flash via rpi-imager (or
+`dd` + `xz` fallback), then answer the bless prompts: username, password (hashed
+with `openssl passwd -6`, falling back to Homebrew `openssl@3`), hostname, IP,
+prefix, gateway, and optionally a tagged VLAN. The tool validates with PyYAML,
+writes, reads back, and ejects.
 
-**Prep a whole stack of cards for a show:** `cardbless batch --config show.yaml
-[--flash]` (not yet implemented) — iterates the units list, prompting to insert
-each card.
+**Bless an already-flashed card:** same bless prompts, no flashing; the boot
+partition is found and sanity-checked first.
 
-**Generate a password hash for config.yaml:** `cardbless hash-password` (not yet
-implemented) — prompts twice with no echo, outputs a `$6$` hash via
-`openssl passwd -6` (falls back to Homebrew `openssl@3` if the system LibreSSL
-lacks `-6`).
+**Clean up a booted unit (over SSH):** removes the leftover `user-data` and
+`network-config` from the unit's `/boot/firmware`.
+
+**Not implemented yet:** batch mode driven by a show config (units list), a
+standalone `hash-password` command, and the remote image picker.
 
 ### Reference
 
 See `doc/CLAUDE.md` for:
 - Full spec, including verified facts about the CompanionPi image and boot process
 - Known-good `user-data`/`network-config`/`cmdline.txt` examples
-- The YAML config schema (shared settings + per-unit list)
+- The original YAML config schema and batch design (planned, not built)
 - Card detection/safety rules, flash mode details, bless mode step-by-step
 - Nice-to-have features deferred past v1 (post-boot verify, SSH key auth, Linux
   support)

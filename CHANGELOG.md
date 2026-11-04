@@ -5,15 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2026-11-04
-
-### Added
-- Optional tagged VLAN (trunk mode) when blessing a card. The main network stays
-  untagged on `eth0`; an extra 802.1Q VLAN (default 218) is added as `eth0.<id>`,
-  either link-local (self-assigned 169.254.x.x, as Dante uses) or a static IP.
-  Overlapping subnets are refused. Declining the prompt leaves `network-config`
-  byte-identical to before.
-
 ## [Unreleased]
 
 ### Added
@@ -35,6 +26,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - 
+
+## [0.2.1] - 2026-11-04
+
+### Added
+- `LICENSE.txt` (MIT) ahead of making the repo public.
+- Self-hosted GitHub Pages theme from the dpx template (`_layouts/`, `_sass/`,
+  `_includes/`, `assets/`).
+
+### Changed
+- `_config.yml` migrated off the `pages-themes/midnight` remote theme (removes the
+  third-party attribution banner); title and description set for this project.
+- `README.md` moved to the v0.5.8 software footer-logo template and rewritten to
+  describe the working interactive tool (it still said "spec complete,
+  implementation not started" with a planned flag-based CLI).
+- `AGENTS.md` PROJECT section refreshed to match the shipped tool: status,
+  architecture, VLAN decision, real run instructions, and what is still unbuilt.
+
+### Fixed
+- Stale comment in `src/cardbless-v1.py` that still described the image picker as
+  an arrow-key browser.
+
+## [0.2.0] - 2026-11-04
+
+### Added
+- Optional tagged VLAN (trunk mode) when blessing a card. The main network stays
+  untagged on `eth0`; an extra 802.1Q VLAN (default 218) is added as `eth0.<id>`,
+  either link-local (self-assigned 169.254.x.x, as Dante uses) or a static IP.
+  Overlapping subnets are refused. Declining the prompt leaves `network-config`
+  byte-identical to before.
+
+## [0.1.0] - 2026-09-22
+
+### Added
+- Interactive `cardbless` CLI (`src/cardbless-v1.py`): flash + bless or bless only,
+  no flags, plain numbered menus, loops to prep another card.
+- Image picker: numbered list of `.img` / `.img.xz` found recursively under
+  `~/Downloads`, or a typed path.
+- Disk picker limited to external, physical, size-capped disks with a typed
+  confirmation before erasing.
+- Flashing via the rpi-imager CLI with a `dd` + `xz` fallback.
+- Cloud-init rendering for `user-data` and `network-config`, validated with
+  PyYAML and read back after writing; password hashed with `openssl passwd -6`.
+- Post-boot cleanup mode over SSH that removes leftover cloud-init files from a
+  booted unit.
+- `cardbless.log` run log (gitignored).
+
+### Fixed
+- Suppressed the harmless `dot_clean` stderr noise on FAT boot partitions.
 
 ---
 

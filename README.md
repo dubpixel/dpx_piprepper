@@ -5,12 +5,12 @@
 
 
 
-<!-- /// d   u   b   p   i   x   e   l  ---  f   o   r   k   ////--v0.5.7 -->
+<!-- /// d   u   b   p   i   x   e   l  ---  f   o   r   k   ////--v0.5.8 -->
 <!--this has additionally been modifed by @dubpixel for hardware use -->
 <!--search dpx_piprepper.. search & replace is COMMAND OPTION F -->
 
 <!--this is the version for software -->
-<!--todo ** add small product image thats not in a details tag -->
+<!--sub-version of README-dpx_software_template.md: logo moved out of the top hero into a small footer block, hero slot swapped for a real product photo. field-tested in dpx_buttonode (commit f722407). see issue #1. -->
 <!--todo ** new software product image? Remove it? -->
 <!--igure out how to get the details tag to properly render in jekyll for gihub pages.-->
 
@@ -27,11 +27,7 @@
 [![License][license-shield]][license-url]
 [![LinkedIn][linkedin-shield]][linkedin-url]
 </div>
-<!-- PROJECT LOGO -->
 <div align="center">
-  <a href="https://github.com/dubpixel/dpx_piprepper">
-    <img src="images/logo.png" alt="Logo" height="120">
-  </a>
 <h1 align="center">dpx_piprepper</h1>
 <h3 align="center"><i>cardbless: prep a stack of CompanionPi SD cards without touching a keyboard twice</i></h3>
   <p align="center">
@@ -46,6 +42,11 @@
     <a href="https://github.com/dubpixel/dpx_piprepper/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
     </p>
 </div>
+
+<div align="center">
+  <img src="images/front.png" alt="dpx_piprepper hardware" width="600">
+</div>
+
    <br />
 <!-- TABLE OF CONTENTS -->
 <details>
@@ -82,15 +83,21 @@ box, a fresh CompanionPi card has no admin user, no SSH, and no static IP; every
 card needs the same manual first-boot dance repeated by hand. This tool does that
 dance for you, and does it for a whole stack of cards in one sitting.
 
-Two jobs:
+It is fully interactive (no flags, no config file): it walks you through a few
+numbered menus and prompts, then offers to prep another card. Three jobs:
 
 - **bless**: card is already flashed; write per-unit cloud-init files
   (`user-data`, `network-config`) to its boot partition so it comes up with a
   known admin user, SSH enabled, a static per-unit IP, and a unique hostname.
 - **flash + bless**: write the CompanionPi image to the card first, then bless it.
+- **clean up (over SSH)**: on a unit that has already booted, remove the leftover
+  cloud-init `user-data` and `network-config` from its boot partition.
 
-Both support a **batch mode**: work through a list of units for a show, prompt to
-insert the next card, detect it, do the job, eject, repeat.
+**Trunk mode (optional):** when blessing, you can also join one tagged 802.1Q
+VLAN (default 218) alongside the untagged main network, either link-local
+(self-assigned 169.254.x.x, what Dante uses) or a static IP. The main network
+stays untagged on `eth0` so the card works on an access port or on a trunk whose
+native VLAN is the main one.
 
 Full spec lives in [`doc/CLAUDE.md`](doc/CLAUDE.md).
 </br>
@@ -115,51 +122,53 @@ Full spec lives in [`doc/CLAUDE.md`](doc/CLAUDE.md).
 
 ## Getting Started
 
-> **Status:** spec complete, implementation not started yet. Commands below show
-> the planned CLI shape and are marked accordingly.
+> **Status:** v0.2.0, working. Bless, flash + bless, and post-boot cleanup are
+> implemented. The VLAN trunk option is new and still needs a boot test on a real
+> card.
 
   ### Prerequisites
   * macOS (Apple Silicon primary; Linux is nice-to-have, not required)
-  * Python 3
+  * Python 3 and PyYAML (`pip3 install pyyaml`)
   * [Raspberry Pi Imager](https://www.raspberrypi.com/software/) installed, if using flash mode
+    (falls back to `dd` + `xz` if it is not found)
   * `openssl` with `-6` support for password hashing (macOS's system LibreSSL may
     lack this; Homebrew `openssl@3` is the fallback)
 
   ### Installation
 
   1. Clone this repo
-  2. Copy `config.yaml.example` to `config.yaml` and fill in your show's units,
-     network, and admin user *(not yet available — planned for v1)*
+  2. `pip3 install pyyaml`
+  3. Run `python3 src/cardbless-v1.py`
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- USAGE EXAMPLES -->
 ## Usage
 
-*(planned CLI — not yet implemented)*
-
 ```sh
-# Generate a password hash to put in config.yaml
-cardbless hash-password
-
-# Bless an already-flashed card with the next unit in the config
-cardbless bless --config show.yaml
-
-# Flash the CompanionPi image onto a card, then bless it
-cardbless flash --config show.yaml
-
-# Work through a whole stack of cards for a show
-cardbless batch --config show.yaml [--flash]
+python3 src/cardbless-v1.py
 ```
+
+There are no flags. The tool asks, in order:
+
+1. What to do: flash + bless, bless an already-flashed card, or clean up a booted unit over SSH
+2. *(flash only)* the image (a numbered list of every `.img` / `.img.xz` found in `~/Downloads` and its subfolders, or type a full path) and the target disk (external, physical, size-capped, with a typed confirmation before anything is erased)
+3. Admin username, password (hashed with `openssl passwd -6`), and hostname
+4. Static IP, prefix length and gateway, then optionally a tagged VLAN
+5. A summary to confirm, then it writes, validates and ejects the card, and asks whether to prep another
+
+Every blessed card is appended to `cardbless.log` (not committed).
 
 _For the full spec, see [`doc/CLAUDE.md`](doc/CLAUDE.md)._
 <!-- ROADMAP -->
 ## Roadmap
 
-- [ ] v1: bless mode (write cloud-init files to an already-flashed card)
-- [ ] v1: flash + bless mode (rpi-imager CLI primary, `dd` fallback)
-- [ ] v1: batch mode (prompt through a stack of cards for a show)
-- [ ] v1: remote image listing from Bitfocus's stable release tree, defaulting to latest
+- [x] bless mode (write cloud-init files to an already-flashed card)
+- [x] flash + bless mode (rpi-imager CLI primary, `dd` fallback)
+- [x] post-boot cloud-init cleanup over SSH
+- [x] optional tagged VLAN (trunk mode), link-local or static *(needs a real-card boot test)*
+- [ ] batch mode from a show config (units list); today you re-enter details per card
+- [ ] remote image listing from Bitfocus's stable release tree, defaulting to latest
 - [ ] Nice-to-have: post-boot verify (ping unit, check Companion's web port)
 - [ ] Nice-to-have: SSH public key auth alongside/instead of password
 - [ ] Nice-to-have: Linux support (`lsblk` instead of `diskutil`)
@@ -187,7 +196,7 @@ Don't forget to give the project a star! Thanks again!
 
 <!-- LICENSE -->
 ## License
-Distributed under the [LICENSE_TYPE] License. See `LICENSE.txt` for more information.
+Distributed under the MIT License. See `LICENSE.txt` for more information.
 <!-- CONTACT -->
 ## Contact
 
@@ -203,6 +212,16 @@ Distributed under the [LICENSE_TYPE] License. See `LICENSE.txt` for more informa
 -->
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+<div align="center">
+  <a href="https://github.com/dubpixel/dpx_piprepper">
+    <img src="images/logo.png" alt="dpx logo" height="48">
+  </a>
+  <br>
+  <a href="https://github.com/dubpixel/dpx_piprepper/releases/latest">
+    <img src="https://img.shields.io/github/v/release/dubpixel/dpx_piprepper?label=dpx_piprepper&color=blue&style=flat-square" alt="Latest Release">
+  </a>
+</div>
 
 <!-- MARKDOWN LINKS & IMAGES -->
 <!-- https://www.markdownguide.org/basic-syntax/#reference-style-links -->

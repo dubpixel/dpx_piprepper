@@ -83,7 +83,7 @@ def confirm(prompt: str) -> bool:
 
 
 # --------------------------------------------------------------------------
-# Image picker: arrow-key filesystem browser, starts in ~/Downloads
+# Image picker: numbered list of images found recursively under ~/Downloads
 # --------------------------------------------------------------------------
 
 IMAGE_EXTS = (".img", ".img.xz")
