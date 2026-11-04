@@ -6,11 +6,11 @@ This document provides operational directives for AI coding assistants (GitHub C
 
 ## PROJECT: cardbless (dpx_piPrepper)
 
-**Status:** v0.2.0, working (bless, flash + bless, post-boot SSH cleanup). The
+**Status:** v0.2.2, working (bless, flash + bless, post-boot SSH cleanup). The
 optional VLAN trunk prompt (v0.2.0) is rendered and YAML-validated but not yet
 boot-tested from a blessed card.
 **Branch:** `main` is the default; work lands on `feature/*` or `docs/*` branches
-**Version File:** `VERSION` (currently 0.2.0)
+**Version File:** `VERSION` (currently 0.2.2)
 
 ### Architecture (2-minute summary)
 

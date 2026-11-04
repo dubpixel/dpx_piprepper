@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cardbless manual</title>
+<meta name="description" content="cardbless: prep a stack of CompanionPi SD cards. Flash, bless, eject, next card.">
+<link rel="icon" href="images/dubpixel_identicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ===== theme contract: swap this block + the font link to reskin ===== */
+:root{
+  --bg:#0a0a0a; --panel:#151515; --card-2:#1a1a1a; --border:#2a2a2a;
+  --accent:#c9a227; --accent-soft:#e8d48b; --gold-dim:#8b7355;
+  --text:#eee; --text-dim:#999;
+  --warn:#e0735a; --ok:#7bc47f;
+  --font-mono:'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-sans:'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+*{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; }
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:var(--font-sans); line-height:1.6; font-size:1rem;
+}
+a{ color:var(--accent-soft); }
+a:hover{ color:var(--accent); }
+h1,h2,h3,.mono,code,pre,kbd{ font-family:var(--font-mono); }
+code{ background:var(--card-2); border:1px solid var(--border); border-radius:4px; padding:.1em .35em; font-size:.88em; word-break:break-word; }
+pre code{ background:none; border:0; padding:0; font-size:inherit; word-break:normal; }
+.wrap{ max-width:960px; margin:0 auto; padding:0 16px; }
+
+/* top nav */
+.nav{ position:sticky; top:0; z-index:10; background:rgba(10,10,10,.92); backdrop-filter:blur(6px); border-bottom:1px solid var(--border); }
+.nav .wrap{ display:flex; gap:1rem; overflow-x:auto; white-space:nowrap; padding-top:.6rem; padding-bottom:.6rem; }
+.nav a{ font-family:var(--font-mono); font-size:.75rem; text-decoration:none; color:var(--text-dim); }
+.nav a:hover{ color:var(--accent); }
+
+/* hero */
+.hero{ padding:56px 0 36px; text-align:center; }
+.eyebrow{ text-transform:uppercase; letter-spacing:.1em; font-size:.75rem; color:var(--gold-dim); font-family:var(--font-mono); }
+.hero h1{
+  font-size:clamp(2.2rem, 8vw, 3.6rem); margin:.3rem 0 .4rem; line-height:1.05;
+  background:linear-gradient(135deg, var(--accent-soft), var(--accent));
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+}
+.hero p.lead{ max-width:640px; margin:0 auto 1.4rem; color:var(--text-dim); font-size:1.1rem; }
+.btns{ display:flex; gap:.8rem; justify-content:center; flex-wrap:wrap; }
+.btn{ display:inline-block; padding:.7rem 1.3rem; border-radius:8px; font-family:var(--font-mono); font-weight:600; font-size:.85rem; text-decoration:none; }
+.btn.solid{ background:var(--accent); color:#0a0a0a; }
+.btn.solid:hover{ background:var(--accent-soft); color:#0a0a0a; }
+.btn.outline{ border:1px solid var(--accent); color:var(--accent-soft); }
+.btn.outline:hover{ background:var(--panel); }
+.badges{ display:flex; gap:6px; justify-content:center; flex-wrap:wrap; margin-top:1.4rem; }
+.badges img{ height:20px; }
+
+/* sections */
+section{ padding:34px 0 6px; scroll-margin-top:48px; }
+h2{ font-size:1.5rem; margin:0 0 .3rem; color:var(--accent-soft); }
+h2 .n{ color:var(--gold-dim); margin-right:.4rem; }
+h3{ font-size:1.05rem; margin:1.6rem 0 .4rem; color:var(--text); }
+.sub{ color:var(--text-dim); margin:0 0 1.1rem; }
+.panel{ background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:1.1rem 1.25rem; }
+.grid3{ display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; }
+.grid2{ display:grid; grid-template-columns:repeat(2,1fr); gap:1rem; }
+.demo-card{ background:var(--panel); border-top:3px solid var(--accent); border-radius:8px; padding:1.1rem 1.25rem; }
+.demo-card .kicker{ color:var(--gold-dim); font-size:.72rem; text-transform:uppercase; letter-spacing:.08em; font-family:var(--font-mono); }
+.demo-card h3{ margin:.25rem 0 .4rem; }
+.demo-card p{ margin:0; color:var(--text-dim); font-size:.95rem; }
+.callout{ border-left:3px solid var(--accent); background:var(--panel); padding:.9rem 1.2rem; border-radius:0 8px 8px 0; margin:1.1rem 0; }
+.callout.warn{ border-left-color:var(--warn); }
+.callout b.t{ font-family:var(--font-mono); font-size:.8rem; text-transform:uppercase; letter-spacing:.06em; color:var(--accent-soft); }
+.callout.warn b.t{ color:var(--warn); }
+.callout p{ margin:.3rem 0 0; }
+
+/* code + terminal */
+pre{ position:relative; background:#0f0f0f; border:1px solid var(--border); border-radius:8px; padding:1rem 1.1rem; overflow-x:auto; font-size:.82rem; line-height:1.55; margin:.8rem 0; -webkit-overflow-scrolling:touch; }
+pre .c{ color:var(--gold-dim); }
+pre .p{ color:var(--accent); }
+pre .in{ color:var(--ok); }
+.copy{ position:absolute; top:6px; right:6px; font-family:var(--font-mono); font-size:.65rem; background:var(--card-2); color:var(--text-dim); border:1px solid var(--border); border-radius:5px; padding:.2rem .5rem; cursor:pointer; }
+.copy:hover{ color:var(--accent); border-color:var(--accent); }
+.term-label{ font-family:var(--font-mono); font-size:.7rem; color:var(--gold-dim); text-transform:uppercase; letter-spacing:.08em; margin-top:1rem; }
+
+/* steps */
+.steps{ list-style:none; padding:0; counter-reset:step; margin:.6rem 0; }
+.step{ display:flex; gap:1rem; margin-bottom:1.1rem; }
+.step::before{
+  counter-increment:step; content:counter(step);
+  flex:0 0 2rem; height:2rem; border-radius:50%; background:var(--card-2);
+  border:1px solid var(--gold-dim); color:var(--accent); display:flex;
+  align-items:center; justify-content:center; font-family:var(--font-mono); font-size:.85rem;
+}
+.step > div{ flex:1; min-width:0; }
+.step b{ color:var(--accent-soft); }
+.step p{ margin:.15rem 0 0; color:var(--text-dim); }
+
+/* tables */
+.tbl{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
+table{ width:100%; border-collapse:collapse; font-size:.92rem; }
+th,td{ border-bottom:1px solid var(--border); padding:.55rem .7rem; text-align:left; vertical-align:top; }
+th{ font-family:var(--font-mono); font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color:var(--gold-dim); white-space:nowrap; }
+td.ok{ color:var(--ok); }
+td.no{ color:var(--text-dim); }
+
+/* footer */
+.footer{ text-align:center; margin-top:46px; padding:20px 0 40px; border-top:1px solid var(--border); }
+.footer-links{ display:flex; justify-content:center; gap:50px; margin-bottom:24px; flex-wrap:wrap; }
+.footer-link{ display:flex; flex-direction:column; align-items:center; text-decoration:none; color:var(--text-dim); transition:all .3s ease; }
+.footer-link:hover{ color:var(--accent); transform:translateY(-2px); }
+.footer-link svg{ width:32px; height:32px; margin-bottom:6px; fill:currentColor; }
+.footer-link span{ font-family:var(--font-mono); font-size:.65rem; text-transform:lowercase; }
+.footer-logo{ height:36px; width:auto; }
+.footer-tagline{ font-size:.7rem; color:var(--text-dim); margin-top:6px; }
+.footer-version{ font-family:var(--font-mono); font-size:.65rem; color:var(--text-dim); margin-top:8px; }
+
+pre.withcopy{ padding-top:2.2rem; }
+
+@media (max-width:720px){
+  .grid3,.grid2{ grid-template-columns:1fr; }
+  /* stack table rows into cards so narrow columns don't become slivers */
+  .tbl table, .tbl tbody, .tbl tr, .tbl td{ display:block; width:100%; }
+  .tbl thead{ display:none; }
+  .tbl tr{ border-bottom:1px solid var(--border); padding:.6rem 0; }
+  .tbl tr:last-child{ border-bottom:0; }
+  .tbl td{ border:0; padding:.1rem .2rem; }
+  .tbl td:first-child{ color:var(--accent-soft); font-weight:600; }
+  .hero{ padding-top:36px; }
+  .footer-links{ gap:32px; }
+}
+</style>
+</head>
+<body>
+
+<nav class="nav"><div class="wrap">
+  <a href="#what">what it does</a>
+  <a href="#setup">setup</a>
+  <a href="#walkthrough">walkthrough</a>
+  <a href="#safety">safety</a>
+  <a href="#vlan">vlan trunk</a>
+  <a href="#files">what gets written</a>
+  <a href="#trouble">gotchas</a>
+  <a href="#limits">limits</a>
+  <a href="#changes">changelog</a>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+  <div class="eyebrow">dubpixel / show infrastructure / macos</div>
+  <h1>cardbless</h1>
+  <p class="lead">Prep a stack of CompanionPi SD cards without touching a keyboard twice. Flash it, bless it, eject it, next card.</p>
+  <div class="btns">
+    <a class="btn solid" href="#setup">get started</a>
+    <a class="btn outline" href="https://github.com/dubpixel/dpx_piprepper" target="_blank" rel="noopener">view on github</a>
+  </div>
+  <div class="badges">
+    <img alt="contributors" src="https://img.shields.io/github/contributors/dubpixel/dpx_piprepper.svg?style=flat-square">
+    <img alt="forks" src="https://img.shields.io/github/forks/dubpixel/dpx_piprepper.svg?style=flat-square">
+    <img alt="stars" src="https://img.shields.io/github/stars/dubpixel/dpx_piprepper.svg?style=flat-square">
+    <img alt="issues" src="https://img.shields.io/github/issues/dubpixel/dpx_piprepper.svg?style=flat-square">
+    <img alt="license" src="https://img.shields.io/github/license/dubpixel/dpx_piprepper.svg?style=flat-square">
+  </div>
+</div></header>
+
+<main class="wrap">
+
+<!-- ============================ WHAT ============================ -->
+<section id="what">
+  <h2><span class="n">01</span>what it does</h2>
+  <p class="sub">A fresh CompanionPi card (Bitfocus Companion v5.x) has no admin user, no SSH and no static IP, so every card needs the same manual first-boot dance. cardbless does that dance for you. Each blessed unit boots with a known admin user, SSH on, a static per-unit IPv4 address and a unique hostname.</p>
+  <div class="grid3">
+    <div class="demo-card">
+      <div class="kicker">job 1</div>
+      <h3>flash + bless</h3>
+      <p>Write the CompanionPi image to the card first, then bless it.</p>
+    </div>
+    <div class="demo-card">
+      <div class="kicker">job 2</div>
+      <h3>bless</h3>
+      <p>Card is already flashed. Write the per-unit <code>user-data</code> and <code>network-config</code> to its boot partition.</p>
+    </div>
+    <div class="demo-card">
+      <div class="kicker">job 3</div>
+      <h3>clean up over ssh</h3>
+      <p>On a unit that has booted, delete the leftover cloud-init files so the password hash does not stay on the card.</p>
+    </div>
+  </div>
+  <div class="callout">
+    <b class="t">how you drive it</b>
+    <p>One Python file, fully interactive: numbered menus and prompts, no flags, no config file. After each card it asks whether to prep another, so you can work through a stack back to back. You enter the details again for each card.</p>
+  </div>
+</section>
+
+<!-- ============================ SETUP ============================ -->
+<section id="setup">
+  <h2><span class="n">02</span>setup</h2>
+  <p class="sub">macOS is the target (Apple Silicon is the primary machine). The tool exits on any other platform. Linux support is a nice-to-have, not built.</p>
+
+  <h3>prerequisites</h3>
+  <div class="tbl panel"><table>
+    <thead><tr><th>need</th><th>for</th><th>notes</th></tr></thead>
+    <tbody>
+      <tr><td>Python 3 + PyYAML</td><td>everything</td><td><code>pip3 install pyyaml</code>. The tool prints this hint and exits if PyYAML is missing.</td></tr>
+      <tr><td><a href="https://www.raspberrypi.com/software/" target="_blank" rel="noopener">Raspberry Pi Imager</a></td><td>flash</td><td>Used through its CLI. If it is not found at its default app path, the tool falls back to <code>xz</code> + <code>dd</code>.</td></tr>
+      <tr><td><code>openssl</code> with <code>-6</code></td><td>password hash</td><td>macOS's system LibreSSL may lack <code>-6</code>. Homebrew <code>openssl@3</code> is the fallback: <code>brew install openssl@3</code>.</td></tr>
+      <tr><td><code>sshpass</code></td><td>clean up over ssh</td><td><code>brew install sshpass</code>. Only the cleanup mode needs it.</td></tr>
+      <tr><td><code>pv</code> (optional)</td><td>dd fallback</td><td>Shows write progress when flashing without rpi-imager.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>quick start</h3>
+  <pre class="withcopy"><button class="copy" type="button" data-copy="git clone https://github.com/dubpixel/dpx_piprepper.git&#10;cd dpx_piprepper&#10;pip3 install pyyaml&#10;python3 src/cardbless-v1.py"> copy </button><code>git clone https://github.com/dubpixel/dpx_piprepper.git
+cd dpx_piprepper
+pip3 install pyyaml
+python3 src/cardbless-v1.py</code></pre>
+  <p class="sub">Flashing writes raw to the disk and needs admin rights, so you may be asked for your Mac password (<code>sudo</code>).</p>
+</section>
+
+<!-- ============================ WALKTHROUGH ============================ -->
+<section id="walkthrough">
+  <h2><span class="n">03</span>walkthrough</h2>
+  <p class="sub">The order of questions, in the order they appear. The prompt text below is what the tool prints; the answers are made-up examples.</p>
+
+  <ol class="steps">
+    <li class="step"><div><b>pick the job</b><p>Flash then bless, bless only, or clean up over SSH. Type a number, or <code>q</code> to quit at any menu.</p></div></li>
+    <li class="step"><div><b>pick the image (flash only)</b><p>A numbered list of every <code>.img</code> and <code>.img.xz</code> found in <code>~/Downloads</code> and its subfolders, with sizes. The last entry lets you type a full path instead.</p></div></li>
+    <li class="step"><div><b>pick the disk (flash only)</b><p>Only external, physical disks under the size cap are listed. You must type the disk identifier to confirm the erase.</p></div></li>
+    <li class="step"><div><b>flash</b><p>rpi-imager CLI if installed, otherwise <code>xz</code> + <code>dd</code>. Then it waits up to 30 seconds for the boot volume to mount at <code>/Volumes/bootfs</code>.</p></div></li>
+    <li class="step"><div><b>bless prompts</b><p>Admin username, password (typed twice, no echo), hostname, static IP, prefix length, gateway, then the optional tagged VLAN.</p></div></li>
+    <li class="step"><div><b>confirm, write, eject</b><p>You see a summary and answer <code>y</code> to proceed. The tool validates, writes, reads back, ejects the card and logs the result.</p></div></li>
+    <li class="step"><div><b>next card</b><p>It asks <code>Prep another card?</code> and starts over.</p></div></li>
+  </ol>
+
+  <div class="term-label">example session: flash + bless</div>
+<pre><code><span class="c">=== cardbless: prep a CompanionPi SD card ===</span>
+What do you need to do?
+  1. Flash a new image, then bless it
+  2. Bless a card that's already flashed
+  3. Clean up cloud-init files on a booted unit (over SSH)
+&gt; <span class="in">1</span>
+CompanionPi images found under /Users/you/Downloads:
+  1. companionpi/example.img.xz  (0.90 GB)
+  2. Type a full path instead
+&gt; <span class="in">1</span>
+Pick the destination disk (THIS WILL BE ERASED):
+  1. disk6  29.7 GB  Example Reader  [bootfs]
+&gt; <span class="in">1</span>
+Type 'disk6' to confirm you want to erase it: <span class="in">disk6</span>
+<span class="c">... flashing ...</span>
+Admin username [dubpixel]:
+Password for the admin user:
+Confirm password:
+Hostname (mDNS name, becomes &lt;hostname&gt;.local): <span class="in">comp-operator</span>
+Static IP for this unit (e.g. 10.196.11.25): <span class="in">10.196.11.25</span>
+Network prefix length (e.g. 15 for a /15) [24]: <span class="in">15</span>
+Gateway: <span class="in">10.196.11.1</span>
+Also join a tagged VLAN on this port (trunk mode)? [y/N]: <span class="in">n</span>
+
+About to bless /Volumes/bootfs:
+  user: dubpixel   hostname: comp-operator   ip: 10.196.11.25/15   gw: 10.196.11.1
+Proceed? [y/N]: <span class="in">y</span>
+
+OK: comp-operator (10.196.11.25) blessed and ejected.
+
+Prep another card? [y/N]:</code></pre>
+
+  <p class="sub">The image, disk size and volume names above are illustrative. Your list will show what is actually in your Downloads folder and card reader.</p>
+
+  <h3>input rules</h3>
+  <div class="tbl panel"><table>
+    <thead><tr><th>field</th><th>rule</th></tr></thead>
+    <tbody>
+      <tr><td>username</td><td>Lowercase letters, digits, hyphens, underscores; starts with a letter or underscore; up to 32 characters. Default <code>dubpixel</code>. <code>companion</code> is refused (it is Companion's own service account).</td></tr>
+      <tr><td>hostname</td><td>Letters, digits and hyphens; must start with a letter, no leading or trailing hyphen. No underscores. It becomes <code>&lt;hostname&gt;.local</code> over mDNS.</td></tr>
+      <tr><td>IP, prefix, gateway</td><td>Valid IPv4; the IP and the gateway must both be inside the subnet you entered. The gateway is also written as the DNS server (these are local show networks).</td></tr>
+      <tr><td>password</td><td>Asked twice, must match and not be empty. Hashed with <code>openssl passwd -6</code>; the plain text is never written.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>clean up over ssh</h3>
+  <p class="sub">Run this after the card has booted in the Pi. The cloud-init files hold the password hash on a world-readable FAT partition, and this step removes them.</p>
+  <ol class="steps">
+    <li class="step"><div><b>connect</b><p>You enter the unit's IP, an SSH username (default <code>dubpixel</code>) and the password. The tool first removes any stale <code>known_hosts</code> entry for that IP, then connects and reads the hostname.</p></div></li>
+    <li class="step"><div><b>confirm</b><p><code>Remove user-data/network-config from &lt;hostname&gt;'s boot partition?</code></p></div></li>
+    <li class="step"><div><b>remove</b><p>Runs <code>sudo rm -f /boot/firmware/user-data /boot/firmware/network-config</code> on the unit and prints OK or FAIL.</p></div></li>
+  </ol>
+  <p class="sub">Needs <code>sshpass</code>. It also skips strict host key checking for that first connection.</p>
+</section>
+
+<!-- ============================ SAFETY ============================ -->
+<section id="safety">
+  <h2><span class="n">04</span>safety</h2>
+  <p class="sub">Writing to the wrong disk would wipe a drive, so this tool is paranoid on purpose.</p>
+  <div class="grid2">
+    <div class="demo-card">
+      <div class="kicker">before any flash</div>
+      <h3>disk checks</h3>
+      <p>Only disks from <code>diskutil list external physical</code> are considered. Internal and virtual disks are skipped, anything over 256 GB is refused, and you must type the disk identifier (for example <code>disk6</code>) to confirm.</p>
+    </div>
+    <div class="demo-card">
+      <div class="kicker">before any bless</div>
+      <h3>boot partition check</h3>
+      <p>In bless-only mode the mounted volume must contain <code>cmdline.txt</code>, <code>config.txt</code> and <code>meta-data</code>. If none does, nothing is written; if several do, you pick one. Right after a flash, the tool instead waits for <code>/Volumes/bootfs</code> to appear with a <code>cmdline.txt</code>.</p>
+    </div>
+    <div class="demo-card">
+      <div class="kicker">every write</div>
+      <h3>validate and read back</h3>
+      <p>Each rendered file is parsed with PyYAML before it touches the card, then read back and compared to what was intended. A mismatch aborts loudly.</p>
+    </div>
+    <div class="demo-card">
+      <div class="kicker">on the card</div>
+      <h3>files left alone</h3>
+      <p><code>meta-data</code> is untouched. A stray <code>ip=</code> in <code>cmdline.txt</code> is stripped, and stale <code>userconf.txt</code>, <code>userconf</code> and <code>ssh</code> files are removed. Nothing on the card is ever handed to Finder or Terminal.</p>
+    </div>
+  </div>
+  <div class="callout warn">
+    <b class="t">what it does not protect you from</b>
+    <p>The blessed user gets passwordless sudo (<code>NOPASSWD:ALL</code>) and SSH password login is on. That is deliberate, so techs swapping cards under time pressure are not blocked on a sudo prompt. Run the cleanup step after first boot so the hash is not left on the card.</p>
+  </div>
+</section>
+
+<!-- ============================ VLAN ============================ -->
+<section id="vlan">
+  <h2><span class="n">05</span>vlan trunk mode</h2>
+  <p class="sub">Optional, asked during bless. It joins one extra tagged 802.1Q VLAN alongside the main network. The default VLAN ID is 218.</p>
+
+  <div class="callout warn">
+    <b class="t">not boot-tested yet</b>
+    <p>The VLAN option is new in v0.2.0. The generated <code>network-config</code> is rendered and validated as YAML, but it has not been booted from a card the tool blessed. Check <code>ip -br a</code> on the first unit before relying on it.</p>
+  </div>
+
+  <div class="grid2">
+    <div class="demo-card">
+      <div class="kicker">main network</div>
+      <h3>untagged on eth0</h3>
+      <p>Works on an access port, or on a trunk whose native VLAN is the main one. Do not create a tagged twin of the main VLAN: duplicate connected routes send traffic out the wrong interface.</p>
+    </div>
+    <div class="demo-card">
+      <div class="kicker">extra vlan</div>
+      <h3>tagged on eth0.&lt;id&gt;</h3>
+      <p>A netplan VLAN subinterface with no gateway and no DNS, so it stays an isolated segment.</p>
+    </div>
+  </div>
+
+  <h3>addressing choices for the extra vlan</h3>
+  <div class="tbl panel"><table>
+    <thead><tr><th>choice</th><th>what you get</th></tr></thead>
+    <tbody>
+      <tr><td>link-local</td><td>Self-assigned <code>169.254.x.x</code>, no configuration. This is how Dante devices address themselves.</td></tr>
+      <tr><td>static IP</td><td>You enter an IP and prefix (the prefix defaults to the main network's). A subnet that overlaps the main network is refused.</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="callout">
+    <b class="t">switch side</b>
+    <p>On a trunk port feeding the unit, the main VLAN must be the native (untagged) one, and the extra VLAN tagged. A single IP cannot serve both tagged and untagged versions of the same VLAN. Declining the prompt produces exactly the same <code>network-config</code> as before the option existed.</p>
+  </div>
+</section>
+
+<!-- ============================ FILES ============================ -->
+<section id="files">
+  <h2><span class="n">06</span>what gets written</h2>
+  <p class="sub">Two files on the boot partition, rendered per unit. This is the shape that booted and worked on a real card, with the password hash shown as a placeholder.</p>
+
+  <h3>user-data</h3>
+<pre><code>#cloud-config
+
+hostname: comp-operator
+manage_etc_hosts: true
+timezone: America/New_York
+
+users:
+  - name: dubpixel
+    groups: users,adm,dialout,audio,netdev,video,plugdev,cdrom,games,input,gpio,spi,i2c,render,sudo
+    shell: /bin/bash
+    lock_passwd: false
+    passwd: "&lt;SHA-512 crypt hash, $6$...&gt;"
+    sudo: ALL=(ALL) NOPASSWD:ALL
+
+enable_ssh: true
+ssh_pwauth: true</code></pre>
+  <p class="sub">The timezone is fixed in the script (<code>America/New_York</code>). The first line must be the literal <code>#cloud-config</code> or cloud-init ignores the file.</p>
+
+  <h3>network-config</h3>
+<pre><code>network:
+  version: 2
+  renderer: NetworkManager
+  ethernets:
+    eth0:
+      dhcp4: false
+      addresses:
+        - 10.196.11.25/15
+      routes:
+        - to: default
+          via: 10.196.11.1
+      nameservers:
+        addresses: [10.196.11.1]</code></pre>
+
+  <h3>with the vlan option (link-local)</h3>
+<pre><code>  vlans:
+    eth0.218:
+      id: 218
+      link: eth0
+      dhcp4: false
+      link-local: [ipv4]</code></pre>
+  <p class="sub">This block is appended under the same <code>network:</code> key. For a static address, <code>link-local: [ipv4]</code> is replaced by an <code>addresses:</code> list.</p>
+
+  <h3>how it boots</h3>
+  <p class="sub">CompanionPi images are built on Raspberry Pi OS Lite arm64 (Debian Trixie). Images from late November 2025 on use cloud-init for first boot: <code>network-config</code> is written into netplan, which renders to NetworkManager (connections show in <code>nmcli</code> with a <code>netplan-</code> prefix). The FAT boot partition mounts on macOS as <code>/Volumes/bootfs</code>. The root filesystem is ext4 and not readable on macOS, so everything goes through the boot partition. <code>cmdline.txt</code> is left stock, with no <code>ip=</code> parameter.</p>
+</section>
+
+<!-- ============================ TROUBLE ============================ -->
+<section id="trouble">
+  <h2><span class="n">07</span>gotchas</h2>
+  <p class="sub">Learned the hard way. Most of these are why the tool behaves the way it does.</p>
+  <div class="tbl panel"><table>
+    <thead><tr><th>symptom or trap</th><th>what is going on</th></tr></thead>
+    <tbody>
+      <tr><td>Never double-click files on the boot partition</td><td>FAT has no permission bits, so macOS treats every file as executable. Finder hands it to Terminal and runs it. A second try is blocked by Gatekeeper with a misleading "damaged" message. The tool never opens these files; you should not either.</td></tr>
+      <tr><td>No network config after boot</td><td>An earlier manual attempt pasted the shell heredoc lines (<code>cat &gt; ... &lt;&lt; 'EOF'</code> and <code>EOF</code>) into <code>network-config</code>, producing invalid YAML. PyYAML validation plus read-back catches this class of error.</td></tr>
+      <tr><td>Password hash is wrong or empty</td><td>A <code>$6$...</code> hash is expanded by the shell unless single-quoted or written through a quoted heredoc. The tool writes it from Python directly.</td></tr>
+      <tr><td>Static IP ignored</td><td>A kernel <code>ip=</code> parameter in <code>cmdline.txt</code> is the wrong mechanism on this OS; cloud-init's <code>network-config</code> is the right one. The tool strips a stray <code>ip=</code> and never adds one.</td></tr>
+      <tr><td>Username <code>companion</code> refused</td><td>That is the service account Companion runs as. Pick another name.</td></tr>
+      <tr><td>"No openssl with -6 support found"</td><td><code>brew install openssl@3</code>. The tool looks for the Homebrew copy before the system one.</td></tr>
+      <tr><td>"No mounted volume looks like a Pi boot partition"</td><td>Mount the card first. The volume needs <code>cmdline.txt</code>, <code>config.txt</code> and <code>meta-data</code>.</td></tr>
+      <tr><td>No eligible external disks found</td><td>Insert the card. Disks must be external, physical and under 256 GB.</td></tr>
+      <tr><td>Cleanup says it needs sshpass</td><td><code>brew install sshpass</code>.</td></tr>
+      <tr><td><code>dot_clean</code> errors on the card</td><td>It routinely complains about macOS's own hidden folders on FAT volumes. That is expected, so the tool hides its output.</td></tr>
+      <tr><td>rpi-imager's cloud-init flags</td><td>Not used. On macOS they have a known bug (rpi-imager issue #1385) where the files are never copied, so the tool always blesses the card itself afterward.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>the run log</h3>
+  <p class="sub">Every blessed card appends one line to <code>cardbless.log</code> in the project folder: a timestamp, OK or FAIL, the hostname, IP and disk. It is gitignored and stays local.</p>
+</section>
+
+<!-- ============================ LIMITS ============================ -->
+<section id="limits">
+  <h2><span class="n">08</span>limits and roadmap</h2>
+  <div class="tbl panel"><table>
+    <thead><tr><th>item</th><th>status</th></tr></thead>
+    <tbody>
+      <tr><td>Bless, flash + bless, SSH cleanup</td><td class="ok">built</td></tr>
+      <tr><td>Optional tagged VLAN (link-local or static)</td><td class="ok">built, not boot-tested on a card</td></tr>
+      <tr><td>Batch mode from a show config (units list)</td><td class="no">not built; you re-enter details per card</td></tr>
+      <tr><td>Remote image list from Bitfocus's stable release tree</td><td class="no">not built; images come from <code>~/Downloads</code> or a typed path</td></tr>
+      <tr><td>Standalone password-hash command</td><td class="no">not built; hashing happens inside the bless prompts</td></tr>
+      <tr><td>Post-boot verify (ping the unit, check Companion's web port 8000)</td><td class="no">idea</td></tr>
+      <tr><td>SSH public key auth</td><td class="no">idea</td></tr>
+      <tr><td>Linux support</td><td class="no">idea</td></tr>
+    </tbody>
+  </table></div>
+  <p class="sub">Open questions from the spec: whether the gateway should keep doubling as the DNS server, and whether to keep passwordless sudo. Both are current behavior today.</p>
+</section>
+
+<!-- ============================ CHANGELOG ============================ -->
+<section id="changes">
+  <h2><span class="n">09</span>changelog</h2>
+  <div class="tbl panel"><table>
+    <thead><tr><th>version</th><th>date</th><th>what changed</th></tr></thead>
+    <tbody>
+      <tr><td>0.2.2</td><td>2026-11-04</td><td>This manual page and its GitHub Pages deploy, the sshpass prerequisite in the README.</td></tr>
+      <tr><td>0.2.1</td><td>2026-11-04</td><td>MIT license, self-hosted Pages theme, README and AGENTS.md brought in line with the shipped tool.</td></tr>
+      <tr><td>0.2.0</td><td>2026-11-04</td><td>Optional tagged VLAN (trunk mode) when blessing.</td></tr>
+      <tr><td>0.1.0</td><td>2026-09-22</td><td>Interactive CLI: flash + bless, bless, SSH cleanup; recursive image picker; disk safety checks; PyYAML validate and read-back.</td></tr>
+    </tbody>
+  </table></div>
+  <p class="sub">Full history in <a href="https://github.com/dubpixel/dpx_piprepper/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG.md</a>. Released under the <a href="https://github.com/dubpixel/dpx_piprepper/blob/main/LICENSE.txt" target="_blank" rel="noopener">MIT License</a>. Technical spec: <a href="https://github.com/dubpixel/dpx_piprepper/blob/main/doc/CLAUDE.md" target="_blank" rel="noopener">doc/CLAUDE.md</a>.</p>
+</section>
+
+</main>
+
+<footer class="footer">
+  <!-- ========== FOOTER LINKS - EDIT URLs HERE ========== -->
+  <div class="footer-links">
+    <a href="https://github.com/dubpixel/dpx_piprepper" class="footer-link" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      <span>github</span>
+    </a>
+    <a href="https://github.com/dubpixel/dpx_piprepper/issues" class="footer-link" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+      <span>issues</span>
+    </a>
+  </div>
+  <!-- ================================================== -->
+  <a href="https://www.dubpixel.tv" target="_blank" rel="noopener" title="dubpixel.tv">
+    <img src="images/logo.png" alt="dubpixel" class="footer-logo">
+  </a>
+  <div class="footer-tagline">making strange things daily</div>
+  <div class="footer-version">cardbless v0.2.2</div>
+</footer>
+
+<script>
+/* copy buttons on code blocks that opt in with data-copy */
+document.querySelectorAll('.copy').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var text = b.getAttribute('data-copy');
+    if (!navigator.clipboard) { return; }
+    navigator.clipboard.writeText(text).then(function () {
+      var old = b.textContent; b.textContent = ' copied ';
+      setTimeout(function () { b.textContent = old; }, 1200);
+    });
+  });
+});
+</script>
+</body>
+</html>
