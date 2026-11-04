@@ -27,6 +27,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - 
 
+## [0.2.2] - 2026-11-04
+
+### Added
+- Single-page manual at `index.html` (walkthrough of the real prompts, safety
+  checks, VLAN trunk mode, files written, gotchas, limits), published with GitHub
+  Pages. It takes the place of the Jekyll render of the README as the site's home.
+- GitHub Pages deploy workflow (`.github/workflows/pages.yml`), runs on push to `main`.
+
+### Changed
+- `README.md` documents the `sshpass` prerequisite for the SSH cleanup mode and why
+  cleanup exists (the password hash would otherwise stay on the world-readable FAT
+  boot partition).
+
 ## [0.2.1] - 2026-11-04
 
 ### Added

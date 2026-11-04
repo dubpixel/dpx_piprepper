@@ -124,7 +124,7 @@ Full spec lives in [`doc/CLAUDE.md`](doc/CLAUDE.md).
 
 ## Getting Started
 
-> **Status:** v0.2.0, working. Bless, flash + bless, and post-boot cleanup are
+> **Status:** v0.2.2, working. Bless, flash + bless, and post-boot cleanup are
 > implemented. The VLAN trunk option is new and still needs a boot test on a real
 > card.
 
