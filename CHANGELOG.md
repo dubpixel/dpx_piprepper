@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - 
 
+## [0.2.3] - 2026-11-04
+
+### Changed
+- Manual page title, heading and footer now lead with `dpx_piprepper`; the tool
+  itself is still called cardbless.
+
 ## [0.2.2] - 2026-11-04
 
 ### Added
