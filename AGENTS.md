@@ -129,7 +129,7 @@ Python 3, stdlib-first, no build step; shells out to `diskutil`, `openssl`, `dd`
 
 **Run it:** `python3 src/cardbless-v1.py` (needs `pip3 install pyyaml`). No flags;
 the first menu picks the job. **GUI:** `python3 src/cardbless-gui.py` opens a local
-page; run `sudo -v` in that terminal first if you will flash.
+page; flashing asks for your Mac password in a system dialog.
 
 **Flash + bless:** pick the image (numbered list from `~/Downloads`), pick the disk
 (external, physical, size-capped, typed confirmation), flash via rpi-imager (or

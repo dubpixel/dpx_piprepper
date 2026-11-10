@@ -19,7 +19,8 @@
 #   - every POST needs a random per-run token, sent in the X-Token header
 #   - disks, boot volumes and images are re-checked server side against the
 #     same lists the CLI uses; the browser's word is never trusted
-#   - flashing needs the disk id typed back exactly, same as the CLI
+#   - flashing needs the disk id typed back exactly, same as the CLI, and
+#     elevates through the macOS admin password dialog (no terminal sudo)
 #   - passwords are hashed in memory and never written to the log
 #
 # ================================================================================
@@ -33,6 +34,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -176,10 +178,43 @@ def list_boot_volumes(root: Path = Path("/Volumes")) -> list[dict]:
     ]
 
 
-def sudo_ready() -> bool:
-    """True when sudo will not prompt (credentials cached). The GUI has no
-    terminal to type a password into, so flashing needs `sudo -v` first."""
-    return subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode == 0
+def _applescript_quote(text: str) -> str:
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def run_as_admin(shell_cmd: str, prompt: str) -> None:
+    """Run a shell command as root behind the standard macOS password dialog.
+    The GUI has no terminal to type a sudo password into, so this is the
+    native equivalent. Raises core.Abort if the dialog is cancelled."""
+    script = (f'do shell script "{_applescript_quote(shell_cmd)}" '
+              f'with prompt "{_applescript_quote(prompt)}" with administrator privileges')
+    r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    if r.returncode != 0:
+        if "-128" in r.stderr or "canceled" in r.stderr.lower():
+            raise core.Abort()
+        raise RuntimeError(r.stderr.strip() or "admin command failed")
+
+
+def flash_with_admin_dialog(image: Path, disk_id: str) -> None:
+    """GUI twin of core.flash_image: same tools (rpi-imager, else xz+dd), but
+    elevated through the macOS password dialog instead of terminal sudo."""
+    if not re.fullmatch(r"disk\d+", disk_id):
+        raise RuntimeError(f"unexpected disk id {disk_id!r}")
+    dev, rdev = f"/dev/{disk_id}", f"/dev/r{disk_id}"
+    q = shlex.quote
+    if Path(core.RPI_IMAGER).exists():
+        cmd = f"{q(core.RPI_IMAGER)} --cli {q(str(image))} {q(dev)}"
+    else:
+        if image.suffix == ".xz":
+            xz = shutil.which("xz")
+            if not xz:
+                raise RuntimeError("xz not found; install it with: brew install xz")
+            feed = f"{q(xz)} -dc {q(str(image))} | /bin/dd of={q(rdev)} bs=4m"
+        else:
+            feed = f"/bin/dd if={q(str(image))} of={q(rdev)} bs=4m"
+        cmd = (f"set -o pipefail; /usr/sbin/diskutil unmountDisk {q(dev)} && {feed} && "
+               f"/usr/sbin/diskutil mountDisk {q(dev)}")
+    run_as_admin(f"/bin/bash -c {q(cmd)}", "cardbless needs admin rights to write the SD card.")
 
 
 def get_state() -> dict:
@@ -188,7 +223,6 @@ def get_state() -> dict:
         "images": list_images(),
         "disks": list_disks(),
         "boot_volumes": list_boot_volumes(),
-        "sudo_ready": sudo_ready(),
         "sshpass": bool(shutil.which("sshpass")),
         "imager": Path(core.RPI_IMAGER).exists(),
     }
@@ -241,24 +275,38 @@ def clean_bless_fields(p: dict) -> tuple[dict | None, list[str]]:
     except ValueError as e:
         errs.append(f"Network: {e}")
 
-    v = p.get("vlan")
-    if v and net:
-        try:
-            vid = int(str(v.get("id", "")).strip())
-            if not 1 <= vid <= 4094:
-                raise ValueError("VLAN ID must be 1-4094")
-            if v.get("mode") == "static":
-                vprefix = int(str(v.get("prefix", "")).strip())
-                vip = ipaddress.ip_address(str(v.get("ip", "")).strip())
-                vnet = ipaddress.ip_network(f"{vip}/{vprefix}", strict=False)
-                main = ipaddress.ip_network(f"{net['ip']}/{net['prefix']}", strict=False)
-                if vnet.overlaps(main):
-                    raise ValueError(f"{vnet} overlaps the main network {main}; pick a different subnet")
-                net["vlan"] = {"id": vid, "ip": str(vip), "prefix": vprefix}
-            else:
-                net["vlan"] = {"id": vid, "ip": None, "prefix": None}
-        except ValueError as e:
-            errs.append(f"VLAN: {e}")
+    MAX_VLANS = 3
+    vlist = p.get("vlans") or []
+    if not isinstance(vlist, list) or len(vlist) > MAX_VLANS:
+        errs.append(f"At most {MAX_VLANS} extra VLANs.")
+        vlist = []
+    if vlist and net:
+        main = ipaddress.ip_network(f"{net['ip']}/{net['prefix']}", strict=False)
+        seen_ids: set[int] = set()
+        taken = [main]          # subnets already in use; overlaps cause duplicate routes
+        out = []
+        for n, v in enumerate(vlist, start=1):
+            try:
+                vid = int(str(v.get("id", "")).strip())
+                if not 1 <= vid <= 4094:
+                    raise ValueError("VLAN ID must be 1-4094")
+                if vid in seen_ids:
+                    raise ValueError(f"VLAN {vid} is listed twice")
+                seen_ids.add(vid)
+                if v.get("mode") == "static":
+                    vprefix = int(str(v.get("prefix", "")).strip())
+                    vip = ipaddress.ip_address(str(v.get("ip", "")).strip())
+                    vnet = ipaddress.ip_network(f"{vip}/{vprefix}", strict=False)
+                    clash = next((t for t in taken if vnet.overlaps(t)), None)
+                    if clash:
+                        raise ValueError(f"{vnet} overlaps {clash}; pick a different subnet")
+                    taken.append(vnet)
+                    out.append({"id": vid, "ip": str(vip), "prefix": vprefix})
+                else:
+                    out.append({"id": vid, "ip": None, "prefix": None})
+            except ValueError as e:
+                errs.append(f"VLAN {n}: {e}")
+        net["vlan"] = out or None
 
     if errs or net is None:
         return None, errs
@@ -315,8 +363,6 @@ def start_flash_bless(p: dict) -> tuple[int, dict]:
         errs.append("That disk is not an eligible external card right now. Refresh and pick again.")
     if str(p.get("confirm_disk", "")) != disk_id:
         errs.append(f"Type {disk_id or 'the disk id'} exactly to confirm erasing it.")
-    if not sudo_ready():
-        errs.append("Flashing needs admin rights. In the terminal running this GUI, run: sudo -v  then try again.")
     if errs or fields is None:
         return 400, {"errors": errs}
     try:
@@ -325,8 +371,8 @@ def start_flash_bless(p: dict) -> tuple[int, dict]:
         return 400, {"errors": [str(e)]}
 
     def work(step) -> str:
-        step(f"Flashing {image.name} to /dev/{disk_id} (progress prints in the terminal)")
-        core.flash_image(image, disk_id)
+        step(f"Flashing {image.name} to /dev/{disk_id} (enter your Mac password when asked)")
+        flash_with_admin_dialog(image, disk_id)
         step("Waiting for the boot partition")
         bootfs = core.wait_for_bootfs()
         # The CLI only checks cmdline.txt after a flash; require every marker
@@ -525,7 +571,6 @@ def main() -> None:
     srv = make_server(args.port)
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
     print(f"cardbless GUI {version()} at {url}  (Ctrl-C to stop)")
-    print("Flashing needs admin rights: run `sudo -v` in this terminal first.")
     if not args.no_open:
         webbrowser.open(url)
     try:

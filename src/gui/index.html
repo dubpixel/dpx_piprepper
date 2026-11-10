@@ -38,6 +38,8 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);ou
 .drop.over{border-color:var(--accent);background:var(--card-2);color:var(--text)}
 .drop.has{border-style:solid;border-color:var(--ok)}
 .drop #dropStatus{color:var(--accent-soft);font-size:.8rem;word-break:break-all}
+.vrow{background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:.7rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.6rem;align-items:end}
+.vrow .rm{justify-self:end}
 .empty{color:var(--text-dim);font-size:.85rem}
 .row{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
 .btn{background:var(--accent);color:var(--bg);border:0;border-radius:8px;padding:.65rem 1.1rem;font-family:var(--font-mono);font-weight:700;font-size:.85rem;cursor:pointer}
@@ -102,7 +104,7 @@ footer{color:var(--text-dim);font-size:.75rem;margin-top:2rem;font-family:var(--
             <input id="confirmDisk" placeholder="disk4">
           </div>
         </div>
-        <div class="note hidden" id="sudoNote">Flashing needs admin rights. In the terminal running this GUI, run <code>sudo -v</code>, then press Refresh.</div>
+        <div class="note">Flashing asks for your Mac password in a system dialog when you press the button.</div>
       </div>
     </div>
 
@@ -116,9 +118,9 @@ footer{color:var(--text-dim);font-size:.75rem;margin-top:2rem;font-family:var(--
       <h2 id="unitHead">3. Unit</h2>
       <div class="grid">
         <div class="field"><label for="username">admin username</label><input id="username" value="dubpixel"></div>
-        <div class="field"><label for="hostname">hostname (becomes name.local)</label><input id="hostname" placeholder="compoperator"></div>
         <div class="field"><label for="password">password</label><input id="password" type="password"></div>
         <div class="field"><label for="password2">confirm password</label><input id="password2" type="password"></div>
+        <div class="field"><label for="hostname">hostname (becomes name.local)</label><input id="hostname" placeholder="compoperator"></div>
       </div>
     </div>
 
@@ -129,17 +131,9 @@ footer{color:var(--text-dim);font-size:.75rem;margin-top:2rem;font-family:var(--
         <div class="field"><label for="prefix">prefix length</label><input id="prefix" value="15" inputmode="numeric"></div>
         <div class="field"><label for="gateway">gateway</label><input id="gateway" placeholder="10.196.11.1"></div>
       </div>
-      <div class="row" style="margin-top:.8rem">
-        <input type="checkbox" id="vlanOn" style="width:auto">
-        <label for="vlanOn" style="font-size:.8rem;color:var(--text)">Also join a tagged VLAN on this port (trunk mode)</label>
-      </div>
-      <div id="vlanBox" class="grid hidden" style="margin-top:.8rem">
-        <div class="field"><label for="vlanId">VLAN ID (1-4094)</label><input id="vlanId" value="218" inputmode="numeric"></div>
-        <div class="field"><label for="vlanMode">addressing</label>
-          <select id="vlanMode"><option value="linklocal">Link-local (169.254.x.x, Dante)</option><option value="static">Static IP</option></select></div>
-        <div class="field vstatic hidden"><label for="vlanIp">VLAN static IP</label><input id="vlanIp" placeholder="10.206.11.25"></div>
-        <div class="field vstatic hidden"><label for="vlanPrefix">VLAN prefix</label><input id="vlanPrefix" value="15" inputmode="numeric"></div>
-      </div>
+      <h2 style="margin-top:1.2rem">Tagged VLANs (trunk mode, optional, up to 3)</h2>
+      <div id="vlans" class="list"></div>
+      <button class="btn ghost" type="button" id="addVlan" style="margin-top:.6rem">Add VLAN</button>
     </div>
 
     <div class="errs" id="errs" role="alert"></div>
@@ -197,7 +191,6 @@ async function load() {
   radioList($("images"), "image", data.images.map(i => ({value: i.path, title: i.label, sub: i.gb + " GB"})), "No .img or .img.xz found under ~/Downloads. Type a path below.");
   radioList($("disks"), "disk", data.disks.map(d => ({value: d.id, title: `${d.id}  ${d.gb} GB  ${d.name}`, sub: d.volumes.join(", ") || "(no volumes)"})), "No eligible external disk found. Insert the card and refresh.");
   radioList($("boots"), "boot", data.boot_volumes.map(v => ({value: v.path, title: v.name, sub: v.path})), "No mounted volume looks like a Pi boot partition. Mount the card and refresh.");
-  $("sudoNote").classList.toggle("hidden", data.sudo_ready || tab !== "flash");
 }
 
 // Drop zone. Browsers hide a dropped file's real path, so match it by name and
@@ -245,17 +238,38 @@ function setTab(t) {
   $("unitHead").textContent = t === "flash" ? "3. Unit" : "2. Unit";
   $("netHead").textContent = t === "flash" ? "4. Network" : "3. Network";
   $("errs").textContent = "";
-  if (state) $("sudoNote").classList.toggle("hidden", state.sudo_ready || t !== "flash");
 }
 document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => setTab(b.dataset.tab));
 $("refresh").onclick = $("refresh2").onclick = load;
-$("vlanOn").onchange = () => $("vlanBox").classList.toggle("hidden", !$("vlanOn").checked);
-$("vlanMode").onchange = () => document.querySelectorAll(".vstatic").forEach(e => e.classList.toggle("hidden", $("vlanMode").value !== "static"));
+// Up to 3 extra tagged VLANs. The main network always stays untagged on eth0.
+const MAX_VLANS = 3, DEFAULT_IDS = ["218", "206", "300"];
+function fieldBox(label, el) { const d = document.createElement("div"); d.className = "field"; const l = document.createElement("label"); l.textContent = label; d.append(l, el); return d; }
+function addVlan() {
+  const box = $("vlans");
+  if (box.children.length >= MAX_VLANS) return;
+  const row = document.createElement("div"); row.className = "vrow";
+  const id = document.createElement("input"); id.className = "v-id"; id.inputMode = "numeric"; id.value = DEFAULT_IDS[box.children.length];
+  const mode = document.createElement("select"); mode.className = "v-mode";
+  mode.innerHTML = '<option value="linklocal">Link-local (169.254.x.x, Dante)</option><option value="static">Static IP</option>';
+  const ip = document.createElement("input"); ip.className = "v-ip"; ip.placeholder = "10.206.11.25";
+  const pre = document.createElement("input"); pre.className = "v-prefix"; pre.value = "15"; pre.inputMode = "numeric";
+  const ipBox = fieldBox("static IP", ip), preBox = fieldBox("prefix", pre);
+  ipBox.classList.add("hidden"); preBox.classList.add("hidden");
+  mode.onchange = () => [ipBox, preBox].forEach(b => b.classList.toggle("hidden", mode.value !== "static"));
+  const rm = document.createElement("button"); rm.type = "button"; rm.className = "btn ghost rm"; rm.textContent = "Remove";
+  rm.onclick = () => { row.remove(); $("addVlan").disabled = false; };
+  row.append(fieldBox("VLAN ID", id), fieldBox("addressing", mode), ipBox, preBox, rm);
+  box.append(row);
+  $("addVlan").disabled = box.children.length >= MAX_VLANS;
+}
+$("addVlan").onclick = addVlan;
+const vlanPayload = () => [...document.querySelectorAll("#vlans .vrow")].map(r => ({
+  id: r.querySelector(".v-id").value, mode: r.querySelector(".v-mode").value,
+  ip: r.querySelector(".v-ip").value, prefix: r.querySelector(".v-prefix").value}));
 
 function cardPayload() {
   const p = {username: $("username").value, hostname: $("hostname").value, password: $("password").value, password2: $("password2").value,
-             ip: $("ip").value, prefix: $("prefix").value, gateway: $("gateway").value, vlan: null};
-  if ($("vlanOn").checked) p.vlan = {id: $("vlanId").value, mode: $("vlanMode").value, ip: $("vlanIp").value, prefix: $("vlanPrefix").value};
+             ip: $("ip").value, prefix: $("prefix").value, gateway: $("gateway").value, vlans: vlanPayload()};
   if (tab === "flash") {
     p.image = $("imagePath").value.trim() || dropped || picked("image");
     p.disk = picked("disk"); p.confirm_disk = $("confirmDisk").value.trim();

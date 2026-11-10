@@ -24,7 +24,7 @@ spec.loader.exec_module(gui)
 
 GOOD = {
     "username": "dubpixel", "hostname": "compoperator", "password": "pw", "password2": "pw",
-    "ip": "10.196.11.25", "prefix": "15", "gateway": "10.196.11.1", "vlan": None,
+    "ip": "10.196.11.25", "prefix": "15", "gateway": "10.196.11.1", "vlans": [],
 }
 
 
@@ -47,18 +47,43 @@ class Validation(unittest.TestCase):
         self.assertTrue(errs)
 
     def test_vlan_linklocal_and_static(self):
-        f, errs = gui.clean_bless_fields({**GOOD, "vlan": {"id": "218", "mode": "linklocal"}})
-        self.assertEqual((errs, f["net"]["vlan"]), ([], {"id": 218, "ip": None, "prefix": None}))
-        f, errs = gui.clean_bless_fields({**GOOD, "vlan": {"id": "206", "mode": "static", "ip": "10.206.11.25", "prefix": "15"}})
+        f, errs = gui.clean_bless_fields({**GOOD, "vlans": [{"id": "218", "mode": "linklocal"}]})
+        self.assertEqual((errs, f["net"]["vlan"]), ([], [{"id": 218, "ip": None, "prefix": None}]))
+        f, errs = gui.clean_bless_fields({**GOOD, "vlans": [{"id": "206", "mode": "static", "ip": "10.206.11.25", "prefix": "15"}]})
         self.assertEqual(errs, [])
-        self.assertEqual(f["net"]["vlan"]["ip"], "10.206.11.25")
+        self.assertEqual(f["net"]["vlan"][0]["ip"], "10.206.11.25")
 
-    def test_vlan_overlap_and_range_rejected(self):
-        _, errs = gui.clean_bless_fields({**GOOD, "vlan": {"id": "206", "mode": "static", "ip": "10.197.1.1", "prefix": "15"}})
-        self.assertTrue(errs)
-        _, errs = gui.clean_bless_fields({**GOOD, "vlan": {"id": "5000", "mode": "linklocal"}})
+    def test_three_vlans_ok_four_rejected(self):
+        three = [{"id": "218", "mode": "linklocal"},
+                 {"id": "206", "mode": "static", "ip": "10.206.11.25", "prefix": "15"},
+                 {"id": "300", "mode": "static", "ip": "10.40.0.5", "prefix": "24"}]
+        f, errs = gui.clean_bless_fields({**GOOD, "vlans": three})
+        self.assertEqual((errs, len(f["net"]["vlan"])), ([], 3))
+        _, errs = gui.clean_bless_fields({**GOOD, "vlans": three + [{"id": "400", "mode": "linklocal"}]})
         self.assertTrue(errs)
 
+    def test_duplicate_id_and_overlaps_rejected(self):
+        _, errs = gui.clean_bless_fields({**GOOD, "vlans": [{"id": "218", "mode": "linklocal"}, {"id": "218", "mode": "linklocal"}]})
+        self.assertTrue(errs)
+        _, errs = gui.clean_bless_fields({**GOOD, "vlans": [{"id": "206", "mode": "static", "ip": "10.197.1.1", "prefix": "15"}]})
+        self.assertTrue(errs)   # overlaps main
+        two = [{"id": "206", "mode": "static", "ip": "10.40.0.5", "prefix": "24"},
+               {"id": "207", "mode": "static", "ip": "10.40.0.9", "prefix": "24"}]
+        _, errs = gui.clean_bless_fields({**GOOD, "vlans": two})
+        self.assertTrue(errs)   # overlap each other
+        _, errs = gui.clean_bless_fields({**GOOD, "vlans": [{"id": "5000", "mode": "linklocal"}]})
+        self.assertTrue(errs)
+
+    def test_render_multi_vlan_and_single_unchanged(self):
+        one = {"id": 218, "ip": None, "prefix": None}
+        two = {"id": 206, "ip": "10.206.11.25", "prefix": 15}
+        r = gui.core.render_network_config
+        self.assertEqual(r("10.0.0.2", 24, "10.0.0.1", one), r("10.0.0.2", 24, "10.0.0.1", [one]))
+        text = r("10.0.0.2", 24, "10.0.0.1", [one, two])
+        self.assertEqual(text.count("  vlans:\n"), 1)
+        self.assertIn("eth0.218", text)
+        self.assertIn("eth0.206", text)
+        gui.core.yaml.safe_load(text)
 
 class BootAndBless(unittest.TestCase):
     def make_boot(self, root: Path, name: str) -> Path:
@@ -79,7 +104,7 @@ class BootAndBless(unittest.TestCase):
     def test_bless_writes_validated_files(self):
         with tempfile.TemporaryDirectory() as t:
             boot = self.make_boot(Path(t), "bootfs")
-            f, errs = gui.clean_bless_fields({**GOOD, "vlan": {"id": "218", "mode": "linklocal"}})
+            f, errs = gui.clean_bless_fields({**GOOD, "vlans": [{"id": "218", "mode": "linklocal"}]})
             self.assertEqual(errs, [])
             gui.core.LOG_FILE = Path(t) / "test.log"  # keep the real log clean
             msg = gui.do_bless(boot, f, "$6$fakehash", str(boot), eject_after=False)

@@ -34,7 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bless only, and SSH cleanup from the browser, with a drop zone for the disk
   image (matched by name and size to files under ~/Downloads, uploaded to
   ~/Downloads/cardbless-drops if not found). Run `python3 src/cardbless-gui.py`.
-  Binds 127.0.0.1 only, per-run token on every POST, server-side re-check of
+  Flashing elevates through the macOS admin password dialog (no terminal sudo).
+  Up to 3 extra tagged VLANs. Binds 127.0.0.1 only, per-run token on every POST, server-side re-check of
   disks, boot volumes and images, typed disk-id confirmation before any erase.
 - `tests/test_gui.py`: validation, boot-volume detection, bless into a temp
   directory, and server auth rules (no real disk is touched).
