@@ -40,6 +40,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.parse
 import webbrowser
 from http import HTTPStatus
@@ -102,6 +103,14 @@ class Job:
                 if s["state"] == "running":
                     s["state"] = "done"
             self.steps.append({"name": name, "state": "running"})
+
+    def retitle(self, name: str) -> None:
+        """Rewrite the running step's text (used for live progress)."""
+        with self.lock:
+            for s in reversed(self.steps):
+                if s["state"] == "running":
+                    s["name"] = name
+                    return
 
     def finish(self, ok: bool, message: str) -> None:
         with self.lock:
@@ -215,25 +224,57 @@ def stage_image(image: Path) -> Path:
 
 
 def flash_with_admin_dialog(image: Path, disk_id: str) -> None:
-    """GUI twin of core.flash_image: same tools (rpi-imager, else xz+dd), but
-    elevated through the macOS password dialog instead of terminal sudo."""
+    """GUI twin of core.flash_image's dd path, elevated through the macOS
+    password dialog instead of terminal sudo. rpi-imager's CLI is not used
+    here: launched behind the dialog it sat idle and wrote nothing (observed;
+    cause not verified), and dd gives progress we can measure."""
     if not re.fullmatch(r"disk\d+", disk_id):
         raise RuntimeError(f"unexpected disk id {disk_id!r}")
     dev, rdev = f"/dev/{disk_id}", f"/dev/r{disk_id}"
     q = shlex.quote
-    if Path(core.RPI_IMAGER).exists():
-        cmd = f"{q(core.RPI_IMAGER)} --cli {q(str(image))} {q(dev)}"
+    if image.suffix == ".xz":
+        xz = shutil.which("xz")
+        if not xz:
+            raise RuntimeError("xz not found; install it with: brew install xz")
+        feed = f"{q(xz)} -dc {q(str(image))} | /bin/dd of={q(rdev)} bs=4m"
     else:
-        if image.suffix == ".xz":
-            xz = shutil.which("xz")
-            if not xz:
-                raise RuntimeError("xz not found; install it with: brew install xz")
-            feed = f"{q(xz)} -dc {q(str(image))} | /bin/dd of={q(rdev)} bs=4m"
-        else:
-            feed = f"/bin/dd if={q(str(image))} of={q(rdev)} bs=4m"
-        cmd = (f"set -o pipefail; /usr/sbin/diskutil unmountDisk {q(dev)} && {feed} && "
-               f"/usr/sbin/diskutil mountDisk {q(dev)}")
+        feed = f"/bin/dd if={q(str(image))} of={q(rdev)} bs=4m"
+    cmd = (f"set -o pipefail; /usr/sbin/diskutil unmountDisk {q(dev)} && {feed} && "
+           f"/usr/sbin/diskutil mountDisk {q(dev)}")
     run_as_admin(f"/bin/bash -c {q(cmd)}", "cardbless needs admin rights to write the SD card.")
+
+
+def image_total_bytes(image: Path) -> int:
+    """Uncompressed size, so progress can be shown as a percentage."""
+    xz = shutil.which("xz")
+    if image.suffix == ".xz" and xz:
+        r = subprocess.run([xz, "--robot", "-l", str(image)], capture_output=True, text=True)
+        for line in r.stdout.splitlines():
+            parts = line.split("\t")
+            if parts[0] == "totals" and len(parts) > 4:
+                return int(parts[4])
+    return image.stat().st_size
+
+
+def disk_mb(disk_id: str) -> float:
+    """Cumulative MB transferred on a disk since boot (iostat)."""
+    r = subprocess.run(["iostat", "-Id", disk_id], capture_output=True, text=True)
+    try:
+        return float(r.stdout.strip().splitlines()[-1].split()[-1])
+    except (ValueError, IndexError):
+        return 0.0
+
+
+def watch_flash(base_name: str, disk_id: str, total: int, stop: threading.Event) -> None:
+    """Poll the disk's write counter and show percent + speed on the step."""
+    base, t0 = disk_mb(disk_id), time.time()
+    while not stop.wait(2):
+        done = max(0.0, disk_mb(disk_id) - base) * 1024 * 1024
+        if done < 1024 * 1024:
+            continue                  # still waiting on the password dialog / unmount
+        pct = min(99, int(100 * done / total))
+        rate = done / max(1, time.time() - t0) / 1e6
+        JOB.retitle(f"{base_name}: {pct}% ({done / 1e9:.1f} of {total / 1e9:.1f} GB, {rate:.0f} MB/s)")
 
 
 def get_state() -> dict:
@@ -393,10 +434,18 @@ def start_flash_bless(p: dict) -> tuple[int, dict]:
         step("Copying the image to a staging folder")
         staged = stage_image(image)
         try:
-            step(f"Flashing {image.name} to /dev/{disk_id} (enter your Mac password when asked)")
-            flash_with_admin_dialog(staged, disk_id)
+            base_name = f"Flashing {image.name} to /dev/{disk_id}"
+            step(base_name + " (enter your Mac password when asked)")
+            stop = threading.Event()
+            threading.Thread(target=watch_flash, args=(base_name, disk_id, image_total_bytes(staged), stop),
+                             daemon=True).start()
+            try:
+                flash_with_admin_dialog(staged, disk_id)
+            finally:
+                stop.set()
         finally:
             shutil.rmtree(staged.parent, ignore_errors=True)
+        JOB.retitle(f"Flashed {image.name} to /dev/{disk_id}")
         step("Waiting for the boot partition")
         bootfs = core.wait_for_bootfs()
         # The CLI only checks cmdline.txt after a flash; require every marker

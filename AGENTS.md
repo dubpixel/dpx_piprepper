@@ -96,6 +96,9 @@ Python 3, stdlib-first, no build step; shells out to `diskutil`, `openssl`, `dd`
   (duplicate connected routes), and the tool rejects overlapping subnets. A single
   IP cannot serve both tagged and untagged 196; the switch port must send the main
   VLAN native.
+- **GUI flashes with `xz` + `dd`, not rpi-imager:** behind the macOS admin dialog
+  rpi-imager's CLI hung with no writes (observed once; cause not verified). The
+  CLI still prefers rpi-imager.
 - **DNS defaults to the gateway address:** these are local/offline show networks;
   no separate upstream resolver is assumed.
 - **Sudo stays passwordless (`NOPASSWD:ALL`):** matches the known-good `user-data`

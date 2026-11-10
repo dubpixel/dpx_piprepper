@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GUI flash: the root process behind the admin dialog could not read images in
   ~/Downloads (macOS privacy protection); the image is now copied to a staging
   folder first and removed afterward.
+- GUI flash uses xz+dd behind the admin dialog instead of rpi-imager's CLI, which
+  sat idle and wrote nothing there (cause not verified), and shows live percent,
+  GB and MB/s while writing.
 
 ### Notes
 - The CLI (`src/cardbless-v1.py`) is imported unchanged.
