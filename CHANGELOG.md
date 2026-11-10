@@ -27,6 +27,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - 
 
+## [0.3.0] - 2026-11-09
+
+### Added
+- Local web GUI (`src/cardbless-gui.py`, page in `src/gui/index.html`): flash + bless,
+  bless only, and SSH cleanup from the browser. Run `python3 src/cardbless-gui.py`.
+  Binds 127.0.0.1 only, per-run token on every POST, server-side re-check of
+  disks, boot volumes and images, typed disk-id confirmation before any erase.
+- `tests/test_gui.py`: validation, boot-volume detection, bless into a temp
+  directory, and server auth rules (no real disk is touched).
+
+### Notes
+- The CLI (`src/cardbless-v1.py`) is imported unchanged.
+- Not yet verified against a real card: flashing and blessing from the GUI.
+- After a GUI flash, every boot marker is checked before writing (the CLI only
+  checks `cmdline.txt`; see issue #2).
+
 ## [0.2.2] - 2026-11-04
 
 ### Added

@@ -6,11 +6,11 @@ This document provides operational directives for AI coding assistants (GitHub C
 
 ## PROJECT: cardbless (dpx_piPrepper)
 
-**Status:** v0.2.2, working (bless, flash + bless, post-boot SSH cleanup). The
+**Status:** v0.3.0, working (bless, flash + bless, post-boot SSH cleanup). The
 optional VLAN trunk prompt (v0.2.0) is rendered and YAML-validated but not yet
 boot-tested from a blessed card.
 **Branch:** `main` is the default; work lands on `feature/*` or `docs/*` branches
-**Version File:** `VERSION` (currently 0.2.2)
+**Version File:** `VERSION` (currently 0.3.0)
 
 ### Architecture (2-minute summary)
 
@@ -29,6 +29,7 @@ Python 3, stdlib-first, no build step; shells out to `diskutil`, `openssl`, `dd`
 |-----------|---------------|---------|-------|
 | cardbless script | Python 3 / `src/cardbless-v1.py` | Interactive entry point: flash, bless, SSH cleanup | Single file, stdlib + PyYAML |
 | cloud-init rendering | Python / `render_user_data()`, `render_network_config()` | Builds `user-data` and `network-config` per unit | Rendered per unit, not stored as static files |
+| Web GUI | Python / `src/cardbless-gui.py`, `src/gui/index.html` | Local browser front end for the same three jobs | Imports the CLI unchanged; 127.0.0.1 only, token on POSTs |
 | Run log | Text / `cardbless.log` | One line per blessed card (OK/FAIL, hostname, IP) | Gitignored; never commit |
 | Full spec | Markdown / `doc/CLAUDE.md` | Detailed requirements, known-good file examples, gotchas | **Source of truth for the cardbless spec** |
 
@@ -127,7 +128,8 @@ Python 3, stdlib-first, no build step; shells out to `diskutil`, `openssl`, `dd`
 ### Common Operations
 
 **Run it:** `python3 src/cardbless-v1.py` (needs `pip3 install pyyaml`). No flags;
-the first menu picks the job.
+the first menu picks the job. **GUI:** `python3 src/cardbless-gui.py` opens a local
+page; run `sudo -v` in that terminal first if you will flash.
 
 **Flash + bless:** pick the image (numbered list from `~/Downloads`), pick the disk
 (external, physical, size-capped, typed confirmation), flash via rpi-imager (or
