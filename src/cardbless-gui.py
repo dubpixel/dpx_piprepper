@@ -37,6 +37,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import urllib.parse
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -56,6 +57,9 @@ USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 SSH_USER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$")
 TOKEN = secrets.token_urlsafe(24)
 MAX_BODY = 64 * 1024
+MAX_UPLOAD = 16 * 1024 ** 3          # largest image the drop zone will accept
+UPLOAD_DIR = Path.home() / "Downloads" / "cardbless-drops"
+UPLOAD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,200}$")
 
 
 def version() -> str:
@@ -142,8 +146,9 @@ def list_images() -> list[dict]:
         start = Path.home()
     out = []
     for p in core._find_images_below(start):
+        size = p.stat().st_size
         out.append({"path": str(p), "label": str(p.relative_to(start)),
-                    "gb": round(p.stat().st_size / 1024 ** 3, 2)})
+                    "gb": round(size / 1024 ** 3, 2), "bytes": size})
     return out
 
 
@@ -411,6 +416,36 @@ ROUTES = {
 }
 
 
+def receive_upload(handler: "Handler", name: str, length: int) -> tuple[int, dict]:
+    """Stream a dropped image into ~/Downloads/cardbless-drops. Only used when
+    the page could not match the dropped file to one already on disk (browsers
+    never reveal a dropped file's real path)."""
+    safe = Path(name).name
+    if not UPLOAD_NAME_RE.match(safe) or not safe.endswith(core.IMAGE_EXTS):
+        return 400, {"errors": ["Only .img or .img.xz files with a plain name can be uploaded."]}
+    if not 0 < length <= MAX_UPLOAD:
+        return 400, {"errors": [f"Image must be between 1 byte and {MAX_UPLOAD // 1024 ** 3} GB."]}
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    if shutil.disk_usage(UPLOAD_DIR).free < length + 1024 ** 3:
+        return 400, {"errors": ["Not enough free disk space for that image."]}
+    dest = UPLOAD_DIR / safe
+    part = dest.with_suffix(dest.suffix + ".part")
+    left = length
+    try:
+        with part.open("wb") as f:
+            while left:
+                chunk = handler.rfile.read(min(1024 * 1024, left))
+                if not chunk:
+                    raise OSError("connection closed before the upload finished")
+                f.write(chunk)
+                left -= len(chunk)
+        part.replace(dest)
+    except OSError as e:
+        part.unlink(missing_ok=True)
+        return 400, {"errors": [f"Upload failed: {e}"]}
+    return 200, {"path": str(dest)}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "cardbless-gui"
 
@@ -449,7 +484,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(HTTPStatus.FORBIDDEN, {"error": "bad host"})
         if not secrets.compare_digest(self.headers.get("X-Token", ""), TOKEN):
             return self._json(HTTPStatus.FORBIDDEN, {"error": "bad token"})
-        handler = ROUTES.get(self.path)
+        route, _, query = self.path.partition("?")
+        if route == "/api/upload":
+            name = urllib.parse.parse_qs(query).get("name", [""])[0]
+            code, obj = receive_upload(self, name, int(self.headers.get("Content-Length", "0") or 0))
+            return self._json(code, obj)
+        handler = ROUTES.get(route)
         if handler is None:
             return self._json(404, {"error": "not found"})
         try:

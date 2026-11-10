@@ -130,6 +130,26 @@ class Server(unittest.TestCase):
         self.assertEqual(code, 400)
         self.assertIn("errors", json.loads(body))
 
+    def raw_post(self, path, data, token):
+        r = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", data=data)
+        if token is not None:
+            r.add_header("X-Token", token)
+        try:
+            with urllib.request.urlopen(r) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    def test_upload_saves_image_and_rejects_bad_requests(self):
+        with tempfile.TemporaryDirectory() as t:
+            gui.UPLOAD_DIR = Path(t) / "drops"
+            code, body = self.raw_post("/api/upload?name=test.img", b"abc" * 100, gui.TOKEN)
+            self.assertEqual(code, 200)
+            self.assertEqual(Path(body["path"]).read_bytes(), b"abc" * 100)
+            self.assertEqual(self.raw_post("/api/upload?name=evil.sh", b"x", gui.TOKEN)[0], 400)
+            self.assertEqual(self.raw_post("/api/upload?name=../../x.img", b"x", gui.TOKEN)[1].get("path", "").count(".."), 0)
+            self.assertEqual(self.raw_post("/api/upload?name=test.img", b"x", None)[0], 403)
+
     def test_bless_rejects_unlisted_volume(self):
         code, _ = self.req("/api/bless", {**GOOD, "boot": "/etc"}, token=gui.TOKEN)
         self.assertEqual(code, 400)

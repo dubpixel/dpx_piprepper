@@ -34,6 +34,10 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);ou
 .item{display:flex;gap:.6rem;align-items:flex-start;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:.55rem .7rem;font-size:.85rem;cursor:pointer}
 .item input{width:auto;margin-top:.2rem}
 .item small{color:var(--text-dim);display:block}
+.drop{display:flex;flex-direction:column;gap:.2rem;align-items:center;text-align:center;border:2px dashed var(--gold-dim);border-radius:10px;padding:1.2rem;color:var(--text-dim);cursor:pointer}
+.drop.over{border-color:var(--accent);background:var(--card-2);color:var(--text)}
+.drop.has{border-style:solid;border-color:var(--ok)}
+.drop #dropStatus{color:var(--accent-soft);font-size:.8rem;word-break:break-all}
 .empty{color:var(--text-dim);font-size:.85rem}
 .row{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
 .btn{background:var(--accent);color:var(--bg);border:0;border-radius:8px;padding:.65rem 1.1rem;font-family:var(--font-mono);font-weight:700;font-size:.85rem;cursor:pointer}
@@ -75,7 +79,13 @@ footer{color:var(--text-dim);font-size:.75rem;margin-top:2rem;font-family:var(--
     <div id="flashOnly">
       <div class="panel">
         <h2>1. Image</h2>
-        <div class="list" id="images"></div>
+        <div id="drop" class="drop" tabindex="0" role="button" aria-label="Drop a disk image here or click to browse">
+          <strong>Drop the disk image here</strong>
+          <span>or click to browse (.img / .img.xz)</span>
+          <span id="dropStatus" class="mono"></span>
+          <input type="file" id="fileIn" accept=".img,.xz" hidden>
+        </div>
+        <div class="list" id="images" style="margin-top:.6rem"></div>
         <div class="field" style="margin-top:.6rem">
           <label for="imagePath">or type a full path to an .img / .img.xz</label>
           <input id="imagePath" placeholder="/Users/you/Downloads/companionpi.img.xz">
@@ -158,7 +168,7 @@ footer{color:var(--text-dim);font-size:.75rem;margin-top:2rem;font-family:var(--
 <script>
 const TOKEN = "__TOKEN__";
 const $ = id => document.getElementById(id);
-let tab = "flash", state = null, poll = null;
+let tab = "flash", state = null, poll = null, dropped = "";
 
 async function api(path, body) {
   const opt = body === undefined ? {} :
@@ -190,6 +200,39 @@ async function load() {
   $("sudoNote").classList.toggle("hidden", data.sudo_ready || tab !== "flash");
 }
 
+// Drop zone. Browsers hide a dropped file's real path, so match it by name and
+// size against images already under ~/Downloads; upload only if nothing matches.
+function showDrop(msg, ok) { $("dropStatus").textContent = msg; $("drop").classList.toggle("has", !!ok); }
+async function takeFile(file) {
+  if (!file) return;
+  if (!/\.(img|img\.xz)$/.test(file.name)) { showDrop("Not an .img or .img.xz file: " + file.name, false); return; }
+  await load();
+  const hit = state.images.find(i => i.path.split("/").pop() === file.name && i.bytes === file.size);
+  if (hit) { dropped = hit.path; showDrop("Using " + hit.path, true); return; }
+  showDrop("Not found under ~/Downloads, uploading " + file.name + " ...", false);
+  const x = new XMLHttpRequest();
+  x.open("POST", "/api/upload?name=" + encodeURIComponent(file.name));
+  x.setRequestHeader("X-Token", TOKEN);
+  x.upload.onprogress = e => showDrop("Uploading " + file.name + " " + Math.round(100 * e.loaded / e.total) + "%", false);
+  x.onload = () => {
+    let d = {}; try { d = JSON.parse(x.responseText); } catch (_) {}
+    if (x.status === 200) { dropped = d.path; showDrop("Using " + d.path, true); load(); }
+    else showDrop((d.errors || ["Upload failed"]).join(" "), false);
+  };
+  x.onerror = () => showDrop("Upload failed", false);
+  x.send(file);
+}
+const dz = $("drop");
+["dragenter", "dragover"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove("over"); }));
+dz.addEventListener("drop", e => takeFile(e.dataTransfer.files[0]));
+dz.addEventListener("click", () => $("fileIn").click());
+dz.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("fileIn").click(); } });
+$("fileIn").onchange = e => takeFile(e.target.files[0]);
+document.addEventListener("dragover", e => e.preventDefault());   // a stray drop must not navigate away
+document.addEventListener("drop", e => e.preventDefault());
+document.querySelectorAll("#images").forEach(el => el.addEventListener("change", () => { dropped = ""; showDrop("", false); }));
+
 function setTab(t) {
   tab = t;
   document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === t));
@@ -214,7 +257,7 @@ function cardPayload() {
              ip: $("ip").value, prefix: $("prefix").value, gateway: $("gateway").value, vlan: null};
   if ($("vlanOn").checked) p.vlan = {id: $("vlanId").value, mode: $("vlanMode").value, ip: $("vlanIp").value, prefix: $("vlanPrefix").value};
   if (tab === "flash") {
-    p.image = $("imagePath").value.trim() || picked("image");
+    p.image = $("imagePath").value.trim() || dropped || picked("image");
     p.disk = picked("disk"); p.confirm_disk = $("confirmDisk").value.trim();
   } else p.boot = picked("boot");
   return p;
