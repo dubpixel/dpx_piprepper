@@ -38,6 +38,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import urllib.parse
 import webbrowser
@@ -193,6 +194,24 @@ def run_as_admin(shell_cmd: str, prompt: str) -> None:
         if "-128" in r.stderr or "canceled" in r.stderr.lower():
             raise core.Abort()
         raise RuntimeError(r.stderr.strip() or "admin command failed")
+
+
+def stage_image(image: Path) -> Path:
+    """Copy the image to a private staging folder before flashing. The admin
+    dialog runs the flash as a root process that macOS privacy protection
+    (TCC, the com.apple.macl marker) can block from reading ~/Downloads, which
+    fails with "Source file is not readable". This process can read it, and a
+    plain copy carries no such markers. Caller deletes the staging folder."""
+    stage = Path(tempfile.mkdtemp(prefix="cardbless-", dir="/private/var/tmp"))
+    try:
+        if shutil.disk_usage(stage).free < image.stat().st_size + 2 * 1024 ** 3:
+            raise RuntimeError("Not enough free disk space to stage the image.")
+        dest = stage / image.name
+        shutil.copyfile(image, dest)
+    except BaseException:
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
+    return dest
 
 
 def flash_with_admin_dialog(image: Path, disk_id: str) -> None:
@@ -371,8 +390,13 @@ def start_flash_bless(p: dict) -> tuple[int, dict]:
         return 400, {"errors": [str(e)]}
 
     def work(step) -> str:
-        step(f"Flashing {image.name} to /dev/{disk_id} (enter your Mac password when asked)")
-        flash_with_admin_dialog(image, disk_id)
+        step("Copying the image to a staging folder")
+        staged = stage_image(image)
+        try:
+            step(f"Flashing {image.name} to /dev/{disk_id} (enter your Mac password when asked)")
+            flash_with_admin_dialog(staged, disk_id)
+        finally:
+            shutil.rmtree(staged.parent, ignore_errors=True)
         step("Waiting for the boot partition")
         bootfs = core.wait_for_bootfs()
         # The CLI only checks cmdline.txt after a flash; require every marker

@@ -40,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tests/test_gui.py`: validation, boot-volume detection, bless into a temp
   directory, and server auth rules (no real disk is touched).
 
+### Fixed
+- GUI flash: the root process behind the admin dialog could not read images in
+  ~/Downloads (macOS privacy protection); the image is now copied to a staging
+  folder first and removed afterward.
+
 ### Notes
 - The CLI (`src/cardbless-v1.py`) is imported unchanged.
 - Not yet verified against a real card: flashing and blessing from the GUI.

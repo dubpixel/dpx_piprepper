@@ -114,6 +114,20 @@ class BootAndBless(unittest.TestCase):
             self.assertIn("OK", gui.core.LOG_FILE.read_text())
 
 
+class Staging(unittest.TestCase):
+    def test_stage_copies_and_cleans(self):
+        with tempfile.TemporaryDirectory() as t:
+            src = Path(t) / "my image.img.xz"
+            src.write_bytes(b"abc" * 1000)
+            staged = gui.stage_image(src)
+            try:
+                self.assertEqual(staged.read_bytes(), src.read_bytes())
+                self.assertNotEqual(staged.parent, src.parent)
+            finally:
+                gui.shutil.rmtree(staged.parent)
+            self.assertFalse(staged.parent.exists())
+
+
 class Server(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
