@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dpx_piprepper</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%F0%9F%8C%AD%3C/text%3E%3C/svg%3E">
+<style>
+/* gold family, same tokens as the manual */
+:root{
+  --bg:#0a0a0a; --panel:#151515; --card-2:#1a1a1a; --border:#2a2a2a;
+  --accent:#c9a227; --accent-soft:#e8d48b; --gold-dim:#8b7355;
+  --text:#eee; --text-dim:#999; --warn:#e0735a; --ok:#7bc47f;
+  --font-mono:ui-monospace,'SF Mono',Menlo,monospace;
+  --font-sans:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-sans);line-height:1.5}
+.wrap{max-width:760px;margin:0 auto;padding:1.5rem 16px 4rem}
+h1,h2,h3,code,label,.mono{font-family:var(--font-mono)}
+h1{margin:0;font-size:1.6rem;background:linear-gradient(135deg,var(--accent-soft),var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{color:var(--text-dim);margin:.2rem 0 1.2rem;font-size:.9rem}
+.tabs{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem}
+.tabs button{background:var(--panel);color:var(--text-dim);border:1px solid var(--border);padding:.5rem .9rem;border-radius:8px;font:inherit;font-family:var(--font-mono);font-size:.8rem;cursor:pointer}
+.tabs button[aria-selected=true]{color:var(--bg);background:var(--accent);border-color:var(--accent)}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:1.2rem;margin-bottom:1rem}
+.panel h2{margin:0 0 .8rem;font-size:.8rem;text-transform:uppercase;letter-spacing:.1em;color:var(--gold-dim)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.8rem}
+.field{display:flex;flex-direction:column;gap:.25rem;min-width:0}
+label{font-size:.72rem;color:var(--text-dim)}
+input,select{background:var(--card-2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:.5rem .6rem;font:inherit;font-size:.9rem;width:100%}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.list{display:flex;flex-direction:column;gap:.4rem}
+.item{display:flex;gap:.6rem;align-items:flex-start;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:.55rem .7rem;font-size:.85rem;cursor:pointer}
+.item input{width:auto;margin-top:.2rem}
+.item small{color:var(--text-dim);display:block}
+.vrow{background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:.7rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.6rem;align-items:end}
+.vrow .rm{justify-self:end}
+.empty{color:var(--text-dim);font-size:.85rem}
+.row{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
+.btn{background:var(--accent);color:var(--bg);border:0;border-radius:8px;padding:.65rem 1.1rem;font-family:var(--font-mono);font-weight:700;font-size:.85rem;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--accent-soft);border:1px solid var(--gold-dim)}
+.btn.danger{background:var(--warn);color:#000}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.warn{border-left:3px solid var(--warn);background:var(--card-2);padding:.7rem .9rem;border-radius:0 8px 8px 0;font-size:.85rem;margin-bottom:.8rem}
+.note{border-left:3px solid var(--accent);background:var(--card-2);padding:.7rem .9rem;border-radius:0 8px 8px 0;font-size:.85rem;margin-bottom:.8rem}
+.errs{color:var(--warn);font-size:.85rem;margin:.6rem 0;white-space:pre-wrap}
+.steps{list-style:none;margin:.6rem 0 0;padding:0;font-family:var(--font-mono);font-size:.82rem}
+.steps li::before{content:"\25CB  ";color:var(--text-dim)}
+.steps li.running::before{content:"\25CF  ";color:var(--accent)}
+.steps li.done::before{content:"\2713  ";color:var(--ok)}
+.steps li.failed::before{content:"\2717  ";color:var(--warn)}
+.result.ok{color:var(--ok)} .result.bad{color:var(--warn)}
+.hidden{display:none}
+footer{color:var(--text-dim);font-size:.75rem;margin-top:2rem;font-family:var(--font-mono)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>dpx_piprepper</h1>
+  <p class="sub">cardbless: bless a flashed CompanionPi card, then clean up the unit <span id="ver" class="mono"></span></p>
+
+  <div class="tabs" role="tablist" id="tabs">
+    <button role="tab" data-tab="bless" aria-selected="true">Bless card</button>
+    <button role="tab" data-tab="cleanup" aria-selected="false">SSH cleanup</button>
+  </div>
+
+  <div id="job" class="panel hidden" aria-live="polite">
+    <h2 id="jobTitle"></h2>
+    <ul class="steps" id="jobSteps"></ul>
+    <p class="result" id="jobMsg"></p>
+    <button class="btn ghost hidden" id="jobDone" type="button">Prep another card</button>
+  </div>
+
+  <form id="cardForm" autocomplete="off">
+    <div id="blessOnly" class="panel">
+      <h2>1. Boot partition</h2>
+      <div class="note">Flash the card first (balenaEtcher works), leave it mounted, then refresh this list.</div>
+      <div class="list" id="boots"></div>
+      <button class="btn ghost" type="button" id="refresh2" style="margin-top:.6rem">Refresh volumes</button>
+    </div>
+
+    <div class="panel" id="unitPanel">
+      <h2>2. Unit</h2>
+      <div class="grid">
+        <div class="field"><label for="username">admin username</label><input id="username" value="dubpixel"></div>
+        <div class="field"><label for="password">password</label><input id="password" type="password"></div>
+        <div class="field"><label for="password2">confirm password</label><input id="password2" type="password"></div>
+        <div class="field"><label for="hostname">hostname (becomes name.local)</label><input id="hostname" placeholder="compoperator"></div>
+      </div>
+    </div>
+
+    <div class="panel" id="netPanel">
+      <h2>3. Network</h2>
+      <div class="grid">
+        <div class="field"><label for="ip">static IP</label><input id="ip" placeholder="10.196.11.25"></div>
+        <div class="field"><label for="prefix">prefix length</label><input id="prefix" value="15" inputmode="numeric"></div>
+        <div class="field"><label for="gateway">gateway</label><input id="gateway" placeholder="10.196.11.1"></div>
+      </div>
+      <h2 style="margin-top:1.2rem">Tagged VLANs (trunk mode, optional, up to 3)</h2>
+      <div id="vlans" class="list"></div>
+      <button class="btn ghost" type="button" id="addVlan" style="margin-top:.6rem">Add VLAN</button>
+    </div>
+
+    <div class="errs" id="errs" role="alert"></div>
+    <button class="btn" type="submit" id="go">Bless card</button>
+  </form>
+
+  <form id="cleanForm" class="panel hidden" autocomplete="off">
+    <h2>Clean up a booted unit</h2>
+    <div class="note">Removes the leftover <code>user-data</code> and <code>network-config</code> (which hold the password hash) from the unit's <code>/boot/firmware</code> over SSH. Needs <code>sshpass</code>.</div>
+    <div class="grid">
+      <div class="field"><label for="cIp">unit IP address</label><input id="cIp" placeholder="10.196.11.25"></div>
+      <div class="field"><label for="cUser">SSH username</label><input id="cUser" value="dubpixel"></div>
+      <div class="field"><label for="cPass">SSH password</label><input id="cPass" type="password"></div>
+    </div>
+    <div class="errs" id="cErrs" role="alert"></div>
+    <div class="row">
+      <button class="btn ghost" type="button" id="cCheck">Connect and check</button>
+      <button class="btn danger hidden" type="button" id="cRun">Remove files</button>
+    </div>
+    <p id="cInfo" class="empty"></p>
+  </form>
+
+  <footer>runs on 127.0.0.1 only; closes when you stop the terminal</footer>
+</div>
+
+<script>
+const TOKEN = "__TOKEN__";
+const $ = id => document.getElementById(id);
+let tab = "bless", state = null, poll = null;
+
+async function api(path, body) {
+  const opt = body === undefined ? {} :
+    {method: "POST", headers: {"X-Token": TOKEN, "Content-Type": "application/json"}, body: JSON.stringify(body)};
+  const r = await fetch(path, opt);
+  return {code: r.status, data: await r.json()};
+}
+
+function radioList(el, name, rows, empty) {
+  el.textContent = "";
+  if (!rows.length) { const p = document.createElement("div"); p.className = "empty"; p.textContent = empty; el.append(p); return; }
+  rows.forEach((r, i) => {
+    const l = document.createElement("label"); l.className = "item";
+    const inp = document.createElement("input"); inp.type = "radio"; inp.name = name; inp.value = r.value; if (rows.length === 1 || r.checked) inp.checked = true;
+    const t = document.createElement("span"); t.textContent = r.title;
+    const s = document.createElement("small"); s.textContent = r.sub || "";
+    t.append(s); l.append(inp, t); el.append(l);
+  });
+}
+const picked = name => { const e = document.querySelector(`input[name=${name}]:checked`); return e ? e.value : ""; };
+
+async function load() {
+  const {data} = await api("/api/state");
+  state = data;
+  $("ver").textContent = "v" + data.version;
+  radioList($("boots"), "boot", data.boot_volumes.map(v => ({value: v.path, title: v.name, sub: v.path})), "No mounted volume looks like a Pi boot partition. Mount the card and refresh.");
+}
+
+function setTab(t) {
+  tab = t;
+  document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === t));
+  const card = t !== "cleanup";
+  $("cardForm").classList.toggle("hidden", !card);
+  $("cleanForm").classList.toggle("hidden", card);
+  $("errs").textContent = "";
+}
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => setTab(b.dataset.tab));
+$("refresh2").onclick = load;
+// Up to 3 extra tagged VLANs. The main network always stays untagged on eth0.
+const MAX_VLANS = 3, DEFAULT_IDS = ["218", "206", "300"];
+function fieldBox(label, el) { const d = document.createElement("div"); d.className = "field"; const l = document.createElement("label"); l.textContent = label; d.append(l, el); return d; }
+function addVlan() {
+  const box = $("vlans");
+  if (box.children.length >= MAX_VLANS) return;
+  const row = document.createElement("div"); row.className = "vrow";
+  const id = document.createElement("input"); id.className = "v-id"; id.inputMode = "numeric"; id.value = DEFAULT_IDS[box.children.length];
+  const mode = document.createElement("select"); mode.className = "v-mode";
+  mode.innerHTML = '<option value="linklocal">Link-local (169.254.x.x, Dante)</option><option value="static">Static IP</option>';
+  const ip = document.createElement("input"); ip.className = "v-ip"; ip.placeholder = "10.206.11.25";
+  const pre = document.createElement("input"); pre.className = "v-prefix"; pre.value = "15"; pre.inputMode = "numeric";
+  const ipBox = fieldBox("static IP", ip), preBox = fieldBox("prefix", pre);
+  ipBox.classList.add("hidden"); preBox.classList.add("hidden");
+  mode.onchange = () => [ipBox, preBox].forEach(b => b.classList.toggle("hidden", mode.value !== "static"));
+  const rm = document.createElement("button"); rm.type = "button"; rm.className = "btn ghost rm"; rm.textContent = "Remove";
+  rm.onclick = () => { row.remove(); $("addVlan").disabled = false; };
+  row.append(fieldBox("VLAN ID", id), fieldBox("addressing", mode), ipBox, preBox, rm);
+  box.append(row);
+  $("addVlan").disabled = box.children.length >= MAX_VLANS;
+}
+$("addVlan").onclick = addVlan;
+const vlanPayload = () => [...document.querySelectorAll("#vlans .vrow")].map(r => ({
+  id: r.querySelector(".v-id").value, mode: r.querySelector(".v-mode").value,
+  ip: r.querySelector(".v-ip").value, prefix: r.querySelector(".v-prefix").value}));
+
+function cardPayload() {
+  const p = {username: $("username").value, hostname: $("hostname").value, password: $("password").value, password2: $("password2").value,
+             ip: $("ip").value, prefix: $("prefix").value, gateway: $("gateway").value, vlans: vlanPayload()};
+  p.boot = picked("boot");
+  return p;
+}
+
+$("cardForm").onsubmit = async e => {
+  e.preventDefault();
+  $("errs").textContent = "";
+  const {code, data} = await api("/api/bless", cardPayload());
+  if (code !== 200) { $("errs").textContent = (data.errors || [data.error || "Request failed"]).join("\n"); return; }
+  watchJob();
+};
+
+function watchJob() {
+  $("cardForm").classList.add("hidden"); $("cleanForm").classList.add("hidden"); $("job").classList.remove("hidden");
+  $("jobDone").classList.add("hidden");
+  clearInterval(poll);
+  const tick = async () => {
+    const {data: j} = await api("/api/job");
+    $("jobTitle").textContent = j.title;
+    $("jobSteps").textContent = "";
+    j.steps.forEach(s => { const li = document.createElement("li"); li.className = s.state; li.textContent = s.name; $("jobSteps").append(li); });
+    const m = $("jobMsg"); m.textContent = j.message; m.className = "result " + (j.state === "done" ? "ok" : j.state === "failed" ? "bad" : "");
+    if (j.state === "done" || j.state === "failed") { clearInterval(poll); $("jobDone").classList.remove("hidden"); }
+  };
+  tick(); poll = setInterval(tick, 1000);
+}
+$("jobDone").onclick = () => {
+  $("job").classList.add("hidden");
+  ["password", "password2", "hostname", "ip", "cPass"].forEach(i => $(i).value = "");
+  setTab(tab); load();
+};
+
+function cleanPayload() { return {ip: $("cIp").value, username: $("cUser").value, password: $("cPass").value}; }
+$("cCheck").onclick = async () => {
+  $("cErrs").textContent = ""; $("cInfo").textContent = ""; $("cRun").classList.add("hidden");
+  const {code, data} = await api("/api/cleanup-check", cleanPayload());
+  if (code !== 200) { $("cErrs").textContent = (data.errors || ["Failed"]).join("\n"); return; }
+  $("cInfo").textContent = `Connected to ${data.hostname}. Remove user-data and network-config from its boot partition?`;
+  $("cRun").classList.remove("hidden");
+};
+$("cRun").onclick = async () => {
+  const {code, data} = await api("/api/cleanup-run", cleanPayload());
+  if (code !== 200) { $("cErrs").textContent = (data.errors || ["Failed"]).join("\n"); return; }
+  watchJob();
+};
+
+setTab("bless"); load();
+</script>
+</body>
+</html>

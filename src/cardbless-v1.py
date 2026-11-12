@@ -408,21 +408,25 @@ def render_network_config(ip: str, prefix: int, gateway: str, vlan: dict | None 
         "      nameservers:\n"
         f"        addresses: [{gateway}]\n"
     )
-    if vlan:
-        # Tagged subinterface only for the extra VLAN; the main network stays
+    # Accepts None, one VLAN dict (what the CLI passes) or a list of them (GUI,
+    # up to 3). Output for a single VLAN is unchanged.
+    vlans = [vlan] if isinstance(vlan, dict) else list(vlan or [])
+    if vlans:
+        # Tagged subinterfaces only for the extra VLANs; the main network stays
         # untagged on eth0 (never create a tagged twin of it). No gateway or
-        # DNS here: the extra VLAN is an isolated segment.
+        # DNS here: the extra VLANs are isolated segments.
+        text += "  vlans:\n"
+    for v in vlans:
         text += (
-            "  vlans:\n"
-            f"    eth0.{vlan['id']}:\n"
-            f"      id: {vlan['id']}\n"
+            f"    eth0.{v['id']}:\n"
+            f"      id: {v['id']}\n"
             "      link: eth0\n"
             "      dhcp4: false\n"
         )
-        if vlan["ip"] is None:
+        if v["ip"] is None:
             text += "      link-local: [ipv4]\n"
         else:
-            text += f"      addresses:\n        - {vlan['ip']}/{vlan['prefix']}\n"
+            text += f"      addresses:\n        - {v['ip']}/{v['prefix']}\n"
     return text
 
 

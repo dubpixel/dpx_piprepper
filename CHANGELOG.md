@@ -27,6 +27,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - 
 
+## [0.3.0] - 2026-11-09
+
+### Added
+- Local web GUI (`src/cardbless-gui.py`, page in `src/gui/index.html`): bless a
+  card that is already flashed, and SSH cleanup of a booted unit. Run
+  `python3 src/cardbless-gui.py`. Up to 3 extra tagged VLANs. Binds 127.0.0.1
+  only, per-run token on every POST, and the chosen boot volume is re-checked
+  server side against the same marker files the CLI requires.
+- `tests/test_gui.py`: validation, VLAN rules, boot-volume detection, bless
+  into a temp directory, and server auth rules (no real disk is touched).
+
+### Changed
+- `render_network_config()` also accepts a list of VLANs. Output for none or one
+  VLAN is unchanged.
+
+### Notes
+- The GUI does not flash. Flashing from the GUI did not work on macOS (see
+  issue #5), so flash with balenaEtcher or the CLI, then bless.
+- Not yet verified against a real card through the GUI: bless and eject.
+
 ## [0.2.2] - 2026-11-04
 
 ### Added
