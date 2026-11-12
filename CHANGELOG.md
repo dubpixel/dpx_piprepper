@@ -30,29 +30,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.0] - 2026-11-09
 
 ### Added
-- Local web GUI (`src/cardbless-gui.py`, page in `src/gui/index.html`): flash + bless,
-  bless only, and SSH cleanup from the browser, with a drop zone for the disk
-  image (matched by name and size to files under ~/Downloads, uploaded to
-  ~/Downloads/cardbless-drops if not found). Run `python3 src/cardbless-gui.py`.
-  Flashing elevates through the macOS admin password dialog (no terminal sudo).
-  Up to 3 extra tagged VLANs. Binds 127.0.0.1 only, per-run token on every POST, server-side re-check of
-  disks, boot volumes and images, typed disk-id confirmation before any erase.
-- `tests/test_gui.py`: validation, boot-volume detection, bless into a temp
-  directory, and server auth rules (no real disk is touched).
+- Local web GUI (`src/cardbless-gui.py`, page in `src/gui/index.html`): bless a
+  card that is already flashed, and SSH cleanup of a booted unit. Run
+  `python3 src/cardbless-gui.py`. Up to 3 extra tagged VLANs. Binds 127.0.0.1
+  only, per-run token on every POST, and the chosen boot volume is re-checked
+  server side against the same marker files the CLI requires.
+- `tests/test_gui.py`: validation, VLAN rules, boot-volume detection, bless
+  into a temp directory, and server auth rules (no real disk is touched).
 
-### Fixed
-- GUI flash: the root process behind the admin dialog could not read images in
-  ~/Downloads (macOS privacy protection); the image is now copied to a staging
-  folder first and removed afterward.
-- GUI flash uses xz+dd behind the admin dialog instead of rpi-imager's CLI, which
-  sat idle and wrote nothing there (cause not verified), and shows live percent,
-  GB and MB/s while writing.
+### Changed
+- `render_network_config()` also accepts a list of VLANs. Output for none or one
+  VLAN is unchanged.
 
 ### Notes
-- The CLI (`src/cardbless-v1.py`) is imported unchanged.
-- Not yet verified against a real card: flashing and blessing from the GUI.
-- After a GUI flash, every boot marker is checked before writing (the CLI only
-  checks `cmdline.txt`; see issue #2).
+- The GUI does not flash. Flashing from the GUI did not work on macOS (see
+  issue #5), so flash with balenaEtcher or the CLI, then bless.
+- Not yet verified against a real card through the GUI: bless and eject.
 
 ## [0.2.2] - 2026-11-04
 

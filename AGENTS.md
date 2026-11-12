@@ -29,7 +29,7 @@ Python 3, stdlib-first, no build step; shells out to `diskutil`, `openssl`, `dd`
 |-----------|---------------|---------|-------|
 | cardbless script | Python 3 / `src/cardbless-v1.py` | Interactive entry point: flash, bless, SSH cleanup | Single file, stdlib + PyYAML |
 | cloud-init rendering | Python / `render_user_data()`, `render_network_config()` | Builds `user-data` and `network-config` per unit | Rendered per unit, not stored as static files |
-| Web GUI | Python / `src/cardbless-gui.py`, `src/gui/index.html` | Local browser front end for the same three jobs | Imports the CLI unchanged; 127.0.0.1 only, token on POSTs |
+| Web GUI | Python / `src/cardbless-gui.py`, `src/gui/index.html` | Local browser front end for bless and SSH cleanup (no flashing) | Imports the CLI unchanged; 127.0.0.1 only, token on POSTs |
 | Run log | Text / `cardbless.log` | One line per blessed card (OK/FAIL, hostname, IP) | Gitignored; never commit |
 | Full spec | Markdown / `doc/CLAUDE.md` | Detailed requirements, known-good file examples, gotchas | **Source of truth for the cardbless spec** |
 
@@ -96,9 +96,6 @@ Python 3, stdlib-first, no build step; shells out to `diskutil`, `openssl`, `dd`
   (duplicate connected routes), and the tool rejects overlapping subnets. A single
   IP cannot serve both tagged and untagged 196; the switch port must send the main
   VLAN native.
-- **GUI flashes with `xz` + `dd`, not rpi-imager:** behind the macOS admin dialog
-  rpi-imager's CLI hung with no writes (observed once; cause not verified). The
-  CLI still prefers rpi-imager.
 - **DNS defaults to the gateway address:** these are local/offline show networks;
   no separate upstream resolver is assumed.
 - **Sudo stays passwordless (`NOPASSWD:ALL`):** matches the known-good `user-data`
@@ -132,7 +129,7 @@ Python 3, stdlib-first, no build step; shells out to `diskutil`, `openssl`, `dd`
 
 **Run it:** `python3 src/cardbless-v1.py` (needs `pip3 install pyyaml`). No flags;
 the first menu picks the job. **GUI:** `python3 src/cardbless-gui.py` opens a local
-page; flashing asks for your Mac password in a system dialog.
+page for bless and SSH cleanup; flash first with balenaEtcher or the CLI.
 
 **Flash + bless:** pick the image (numbered list from `~/Downloads`), pick the disk
 (external, physical, size-capped, typed confirmation), flash via rpi-imager (or

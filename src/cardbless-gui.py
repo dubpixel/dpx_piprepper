@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 # ================================================================================
-# WEB GUI - Browser front end for the cardbless SD card flasher + blesser
+# WEB GUI - Browser front end for the cardbless SD card blesser
 # ================================================================================
-# Local-only web UI. Same three jobs as the CLI (flash + bless, bless, SSH
-# cleanup) with the same safety rules, driven from a page in your browser.
+# Local-only web UI. Two jobs from the CLI (bless a card that is already
+# flashed, SSH cleanup of a booted unit), driven from a page in your browser.
+# Flashing is not offered here; flash with Etcher (or the CLI), then bless.
 # ================================================================================
 # PROJECT: cardbless (dpx_piPrepper)
 # ================================================================================
 #
 # File: cardbless-gui.py
 # Purpose: stdlib http.server on 127.0.0.1 that wraps the functions in
-#          cardbless-v1.py (disk listing, rendering, validated writes, eject).
+#          cardbless-v1.py (boot-volume check, rendering, validated writes, eject).
 #          The CLI file is imported unchanged; nothing in it is modified.
 # Dependencies: PyYAML (via cardbless-v1.py), stdlib only otherwise
 #
 # Safety model (this can erase disks, so the server is strict):
 #   - binds 127.0.0.1 only; Host header must be localhost/127.0.0.1
 #   - every POST needs a random per-run token, sent in the X-Token header
-#   - disks, boot volumes and images are re-checked server side against the
-#     same lists the CLI uses; the browser's word is never trusted
-#   - flashing needs the disk id typed back exactly, same as the CLI, and
-#     elevates through the macOS admin password dialog (no terminal sudo)
+#   - the chosen boot volume is re-checked server side against the same
+#     marker files the CLI requires; the browser's word is never trusted
+#   - nothing here writes to a raw disk or needs admin rights
 #   - passwords are hashed in memory and never written to the log
 #
 # ================================================================================
@@ -34,14 +34,10 @@ import json
 import os
 import re
 import secrets
-import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
-import time
-import urllib.parse
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -61,9 +57,6 @@ USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 SSH_USER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$")
 TOKEN = secrets.token_urlsafe(24)
 MAX_BODY = 64 * 1024
-MAX_UPLOAD = 16 * 1024 ** 3          # largest image the drop zone will accept
-UPLOAD_DIR = Path.home() / "Downloads" / "cardbless-drops"
-UPLOAD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,200}$")
 
 
 def version() -> str:
@@ -103,14 +96,6 @@ class Job:
                 if s["state"] == "running":
                     s["state"] = "done"
             self.steps.append({"name": name, "state": "running"})
-
-    def retitle(self, name: str) -> None:
-        """Rewrite the running step's text (used for live progress)."""
-        with self.lock:
-            for s in reversed(self.steps):
-                if s["state"] == "running":
-                    s["name"] = name
-                    return
 
     def finish(self, ok: bool, message: str) -> None:
         with self.lock:
@@ -152,30 +137,6 @@ def run_in_thread(title: str, fn) -> bool:
 # State the page needs (all lists come from the same code the CLI uses)
 # --------------------------------------------------------------------------
 
-def list_images() -> list[dict]:
-    start = Path.home() / "Downloads"
-    if not start.is_dir():
-        start = Path.home()
-    out = []
-    for p in core._find_images_below(start):
-        size = p.stat().st_size
-        out.append({"path": str(p), "label": str(p.relative_to(start)),
-                    "gb": round(size / 1024 ** 3, 2), "bytes": size})
-    return out
-
-
-def list_disks() -> list[dict]:
-    try:
-        disks = core.list_external_disks()
-    except (subprocess.CalledProcessError, OSError):
-        return []
-    return [
-        {"id": d["id"], "gb": round(d["size"] / 1024 ** 3, 1), "name": d["media_name"],
-         "volumes": [v for v in d["volume_names"] if v]}
-        for d in disks if d["size"] <= core.MAX_DISK_BYTES
-    ]
-
-
 def list_boot_volumes(root: Path = Path("/Volumes")) -> list[dict]:
     try:
         entries = list(root.iterdir())
@@ -188,103 +149,11 @@ def list_boot_volumes(root: Path = Path("/Volumes")) -> list[dict]:
     ]
 
 
-def _applescript_quote(text: str) -> str:
-    return text.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def run_as_admin(shell_cmd: str, prompt: str) -> None:
-    """Run a shell command as root behind the standard macOS password dialog.
-    The GUI has no terminal to type a sudo password into, so this is the
-    native equivalent. Raises core.Abort if the dialog is cancelled."""
-    script = (f'do shell script "{_applescript_quote(shell_cmd)}" '
-              f'with prompt "{_applescript_quote(prompt)}" with administrator privileges')
-    r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
-    if r.returncode != 0:
-        if "-128" in r.stderr or "canceled" in r.stderr.lower():
-            raise core.Abort()
-        raise RuntimeError(r.stderr.strip() or "admin command failed")
-
-
-def stage_image(image: Path) -> Path:
-    """Copy the image to a private staging folder before flashing. The admin
-    dialog runs the flash as a root process that macOS privacy protection
-    (TCC, the com.apple.macl marker) can block from reading ~/Downloads, which
-    fails with "Source file is not readable". This process can read it, and a
-    plain copy carries no such markers. Caller deletes the staging folder."""
-    stage = Path(tempfile.mkdtemp(prefix="cardbless-", dir="/private/var/tmp"))
-    try:
-        if shutil.disk_usage(stage).free < image.stat().st_size + 2 * 1024 ** 3:
-            raise RuntimeError("Not enough free disk space to stage the image.")
-        dest = stage / image.name
-        shutil.copyfile(image, dest)
-    except BaseException:
-        shutil.rmtree(stage, ignore_errors=True)
-        raise
-    return dest
-
-
-def flash_with_admin_dialog(image: Path, disk_id: str) -> None:
-    """GUI twin of core.flash_image's dd path, elevated through the macOS
-    password dialog instead of terminal sudo. rpi-imager's CLI is not used
-    here: launched behind the dialog it sat idle and wrote nothing (observed;
-    cause not verified), and dd gives progress we can measure."""
-    if not re.fullmatch(r"disk\d+", disk_id):
-        raise RuntimeError(f"unexpected disk id {disk_id!r}")
-    dev, rdev = f"/dev/{disk_id}", f"/dev/r{disk_id}"
-    q = shlex.quote
-    if image.suffix == ".xz":
-        xz = shutil.which("xz")
-        if not xz:
-            raise RuntimeError("xz not found; install it with: brew install xz")
-        feed = f"{q(xz)} -dc {q(str(image))} | /bin/dd of={q(rdev)} bs=4m"
-    else:
-        feed = f"/bin/dd if={q(str(image))} of={q(rdev)} bs=4m"
-    cmd = (f"set -o pipefail; /usr/sbin/diskutil unmountDisk {q(dev)} && {feed} && "
-           f"/usr/sbin/diskutil mountDisk {q(dev)}")
-    run_as_admin(f"/bin/bash -c {q(cmd)}", "cardbless needs admin rights to write the SD card.")
-
-
-def image_total_bytes(image: Path) -> int:
-    """Uncompressed size, so progress can be shown as a percentage."""
-    xz = shutil.which("xz")
-    if image.suffix == ".xz" and xz:
-        r = subprocess.run([xz, "--robot", "-l", str(image)], capture_output=True, text=True)
-        for line in r.stdout.splitlines():
-            parts = line.split("\t")
-            if parts[0] == "totals" and len(parts) > 4:
-                return int(parts[4])
-    return image.stat().st_size
-
-
-def disk_mb(disk_id: str) -> float:
-    """Cumulative MB transferred on a disk since boot (iostat)."""
-    r = subprocess.run(["iostat", "-Id", disk_id], capture_output=True, text=True)
-    try:
-        return float(r.stdout.strip().splitlines()[-1].split()[-1])
-    except (ValueError, IndexError):
-        return 0.0
-
-
-def watch_flash(base_name: str, disk_id: str, total: int, stop: threading.Event) -> None:
-    """Poll the disk's write counter and show percent + speed on the step."""
-    base, t0 = disk_mb(disk_id), time.time()
-    while not stop.wait(2):
-        done = max(0.0, disk_mb(disk_id) - base) * 1024 * 1024
-        if done < 1024 * 1024:
-            continue                  # still waiting on the password dialog / unmount
-        pct = min(99, int(100 * done / total))
-        rate = done / max(1, time.time() - t0) / 1e6
-        JOB.retitle(f"{base_name}: {pct}% ({done / 1e9:.1f} of {total / 1e9:.1f} GB, {rate:.0f} MB/s)")
-
-
 def get_state() -> dict:
     return {
         "version": version(),
-        "images": list_images(),
-        "disks": list_disks(),
         "boot_volumes": list_boot_volumes(),
         "sshpass": bool(shutil.which("sshpass")),
-        "imager": Path(core.RPI_IMAGER).exists(),
     }
 
 
@@ -374,7 +243,7 @@ def clean_bless_fields(p: dict) -> tuple[dict | None, list[str]]:
 
 
 # --------------------------------------------------------------------------
-# The three jobs
+# The two jobs
 # --------------------------------------------------------------------------
 
 def do_bless(bootfs: Path, f: dict, password_hash: str, disk_label: str, eject_after: bool = True) -> str:
@@ -385,7 +254,7 @@ def do_bless(bootfs: Path, f: dict, password_hash: str, disk_label: str, eject_a
     finally:
         core.log_result(f["hostname"], f["net"]["ip"], disk_label, ok)
     if eject_after:
-        core.eject(disk_label if disk_label.startswith("disk") else bootfs)
+        core.eject(bootfs)
     return f"{f['hostname']} ({f['net']['ip']}) blessed" + (" and ejected." if eject_after else ".")
 
 
@@ -408,57 +277,6 @@ def start_bless(p: dict) -> tuple[int, dict]:
         return msg
 
     if not run_in_thread("Bless card", work):
-        return 409, {"errors": ["Another job is still running."]}
-    return 200, {"started": True}
-
-
-def start_flash_bless(p: dict) -> tuple[int, dict]:
-    fields, errs = clean_bless_fields(p)
-    image = Path(str(p.get("image", ""))).expanduser()
-    if not image.is_file() or not image.name.endswith(core.IMAGE_EXTS):
-        errs.append("Pick an existing .img or .img.xz file.")
-    disk_id = str(p.get("disk", ""))
-    eligible = {d["id"] for d in list_disks()}
-    if disk_id not in eligible:
-        errs.append("That disk is not an eligible external card right now. Refresh and pick again.")
-    if str(p.get("confirm_disk", "")) != disk_id:
-        errs.append(f"Type {disk_id or 'the disk id'} exactly to confirm erasing it.")
-    if errs or fields is None:
-        return 400, {"errors": errs}
-    try:
-        pw_hash = hash_password(fields["password"])
-    except (RuntimeError, subprocess.CalledProcessError) as e:
-        return 400, {"errors": [str(e)]}
-
-    def work(step) -> str:
-        step("Copying the image to a staging folder")
-        staged = stage_image(image)
-        try:
-            base_name = f"Flashing {image.name} to /dev/{disk_id}"
-            step(base_name + " (enter your Mac password when asked)")
-            stop = threading.Event()
-            threading.Thread(target=watch_flash, args=(base_name, disk_id, image_total_bytes(staged), stop),
-                             daemon=True).start()
-            try:
-                flash_with_admin_dialog(staged, disk_id)
-            finally:
-                stop.set()
-        finally:
-            shutil.rmtree(staged.parent, ignore_errors=True)
-        JOB.retitle(f"Flashed {image.name} to /dev/{disk_id}")
-        step("Waiting for the boot partition")
-        bootfs = core.wait_for_bootfs()
-        # The CLI only checks cmdline.txt after a flash; require every marker
-        # before writing, same bar as bless-only mode.
-        missing = [m for m in core.BOOT_MARKERS if not (bootfs / m).exists()]
-        if missing:
-            raise RuntimeError(f"{bootfs} is missing {', '.join(missing)}; not writing to it.")
-        step("Writing cloud-init files")
-        msg = do_bless(bootfs, fields, pw_hash, disk_id)
-        step("Done")
-        return msg
-
-    if not run_in_thread("Flash and bless", work):
         return 409, {"errors": ["Another job is still running."]}
     return 200, {"started": True}
 
@@ -529,40 +347,9 @@ def cleanup_run(p: dict) -> tuple[int, dict]:
 
 ROUTES = {
     "/api/bless": start_bless,
-    "/api/flash-bless": start_flash_bless,
     "/api/cleanup-check": cleanup_check,
     "/api/cleanup-run": cleanup_run,
 }
-
-
-def receive_upload(handler: "Handler", name: str, length: int) -> tuple[int, dict]:
-    """Stream a dropped image into ~/Downloads/cardbless-drops. Only used when
-    the page could not match the dropped file to one already on disk (browsers
-    never reveal a dropped file's real path)."""
-    safe = Path(name).name
-    if not UPLOAD_NAME_RE.match(safe) or not safe.endswith(core.IMAGE_EXTS):
-        return 400, {"errors": ["Only .img or .img.xz files with a plain name can be uploaded."]}
-    if not 0 < length <= MAX_UPLOAD:
-        return 400, {"errors": [f"Image must be between 1 byte and {MAX_UPLOAD // 1024 ** 3} GB."]}
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    if shutil.disk_usage(UPLOAD_DIR).free < length + 1024 ** 3:
-        return 400, {"errors": ["Not enough free disk space for that image."]}
-    dest = UPLOAD_DIR / safe
-    part = dest.with_suffix(dest.suffix + ".part")
-    left = length
-    try:
-        with part.open("wb") as f:
-            while left:
-                chunk = handler.rfile.read(min(1024 * 1024, left))
-                if not chunk:
-                    raise OSError("connection closed before the upload finished")
-                f.write(chunk)
-                left -= len(chunk)
-        part.replace(dest)
-    except OSError as e:
-        part.unlink(missing_ok=True)
-        return 400, {"errors": [f"Upload failed: {e}"]}
-    return 200, {"path": str(dest)}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -603,11 +390,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(HTTPStatus.FORBIDDEN, {"error": "bad host"})
         if not secrets.compare_digest(self.headers.get("X-Token", ""), TOKEN):
             return self._json(HTTPStatus.FORBIDDEN, {"error": "bad token"})
-        route, _, query = self.path.partition("?")
-        if route == "/api/upload":
-            name = urllib.parse.parse_qs(query).get("name", [""])[0]
-            code, obj = receive_upload(self, name, int(self.headers.get("Content-Length", "0") or 0))
-            return self._json(code, obj)
+        route = self.path.partition("?")[0]
         handler = ROUTES.get(route)
         if handler is None:
             return self._json(404, {"error": "not found"})
